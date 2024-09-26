@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, query, result, timestamp as \"timestamp: NaiveDateTime\" from historial",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "query",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "result",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "timestamp: NaiveDateTime",
+        "ordinal": 3,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "45ebac3f6188a966f408803f94ca6051f2401e8f4bf397e1cca42ba6ff204dd0"
+}

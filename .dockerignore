@@ -1,0 +1,13 @@
+.git/
+.gitignore/
+scripts/
+meilidata/
+data.ms/
+cliente/
+Justfile/
+.env
+.dockerignore
+target/
+Dockerfile
+scripts/
+migrations/

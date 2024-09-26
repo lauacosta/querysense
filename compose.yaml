@@ -1,0 +1,31 @@
+# TODO: Configurar medidas de seguridad.
+services:
+  meilisearch:
+    image: getmeili/meilisearch:v1.10.1
+    ports:
+      - ${MEILI_PORT:-7700}:7700
+    environment:
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
+      - OPENAI_KEY=${OPENAI_KEY}
+      - MEILI_DB_PATH=${MEILI_DB_PATH:-/data.ms}
+    networks:
+      - meilisearch
+    volumes:
+      - ./data.ms:/data.ms
+    restart: unless-stopped
+
+  web_client:
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - APP_ENVIRONMENT=${APP_ENVIRONMENT:-local}
+    networks:
+      - meilisearch
+    restart: always
+    depends_on:
+      - meilisearch
+
+networks:
+  meilisearch:
+    driver: bridge
