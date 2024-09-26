@@ -6,5 +6,4 @@
 </div>
 <br>
 
-# About
-Herramienta interna de TNEA para búsquedas híbridas sobre datos, utilizando [MeiliSearch](https://www.meilisearch.com/) como motor de búsquedas.
+Herramienta interna de [TNEA](https://tnea.ar/) para búsquedas híbridas sobre datos, utilizando [MeiliSearch](https://www.meilisearch.com/) como motor de búsquedas.
