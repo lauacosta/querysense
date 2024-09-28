@@ -2534,6 +2534,7 @@ dependencies = [
  "chrono",
  "config",
  "dotenvy",
+ "http",
  "lazy_static",
  "meilisearch-sdk",
  "notify",

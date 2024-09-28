@@ -1,8 +1,10 @@
 use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
+use http::{HeaderValue, Method};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use tokio::signal;
 use tower::ServiceBuilder;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::{
     services::{ServeDir, ServeFile},
     trace::{DefaultOnResponse, TraceLayer},
@@ -120,10 +122,10 @@ impl Application {
 }
 
 pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve<Router, Router> {
-    // let cors = CorsLayer::new()
-    //     .allow_origin(Any)
-    //     .allow_methods(Any)
-    //     .allow_headers(Any);
+    let cors = CorsLayer::new()
+        .allow_origin("http://0.0.0.0:3000".parse::<HeaderValue>().unwrap())
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers(Any);
 
     let server = Router::new()
         .route("/health_check", get(health_check))
@@ -158,8 +160,8 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
                         ),
                 )
                 .layer(RequestIdLayer),
-        );
-    // .layer(cors);
+        )
+        .layer(cors);
 
     axum::serve(listener, server)
 }

@@ -12,7 +12,7 @@ const query = ref('');
 
 const fetchHistorial = async () => {
     try {
-        let response = await fetch(`http://localhost:3000/historial`);
+        let response = await fetch(`/historial`);
         if (response.status !== 200 && response.status !== 204) {
             throw new Error(`HTTP ERROR! status: ${response.status} `);
         }
@@ -26,7 +26,7 @@ const fetchHistorial = async () => {
 
 const handleForm = async () => {
     try {
-        const response = await fetch(`http://localhost:3000/search?query=${query.value}&doc=tnea`);
+        const response = await fetch(`/search?query=${query.value}&doc=tnea`);
         if (response.status !== 200) {
             throw new Error(`HTTP ERROR! status: ${response.status} `);
         }

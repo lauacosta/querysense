@@ -12,6 +12,7 @@ services:
       - meilisearch
     volumes:
       - ./data.ms:/data.ms
+      - ./meili_data/dumps:/meili_data/dumps
     restart: unless-stopped
 
   web_client:

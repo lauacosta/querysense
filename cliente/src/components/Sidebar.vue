@@ -13,7 +13,7 @@ const handleQuery = (event: Event) => {
 const handleForm = async (event: Event) => {
     event.preventDefault();
     try {
-        const response = await fetch(`http://localhost:3000/search?query=${query.value}&doc=historial`);
+        const response = await fetch(`/search?query=${query.value}&doc=historial`);
         if (response.status !== 200) {
             throw new Error(`HTTP ERROR! status: ${response.status}`);
         }

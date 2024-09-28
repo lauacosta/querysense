@@ -116,8 +116,9 @@ pub(crate) async fn search(
     };
 
     tracing::info!(
-        "Busqueda para el query: `{}`, exitosa! El mayor puntaje fue: `{}`",
+        "Busqueda para el query: `{}`, exitosa! de {} registros, el mayor puntaje fue: `{}`",
         params.query,
+        json.len(),
         max_score.unwrap()
     );
 
