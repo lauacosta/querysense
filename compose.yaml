@@ -3,7 +3,7 @@ services:
   meilisearch:
     image: getmeili/meilisearch:v1.10.1
     ports:
-      - ${MEILI_PORT:-7700}:7700
+      - 127.0.0.1:7700:7700
     environment:
       - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
       - OPENAI_KEY=${OPENAI_KEY}

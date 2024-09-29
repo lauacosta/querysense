@@ -81,12 +81,14 @@ pub(crate) async fn search(
         .hits
         .into_iter()
         .filter(|v| {
+            // TODO: Delegar este filtrado a Meilisearch.
             if v.ranking_score > max_score {
                 max_score = v.ranking_score;
             }
             v.ranking_score >= Some(app.ranking_score_threshold)
         })
         .map(|v| {
+            // TODO: Hacer correctamente este paso.
             let mut result = v.result;
             result.ranking_score = v.ranking_score;
             result
@@ -116,10 +118,11 @@ pub(crate) async fn search(
     };
 
     tracing::info!(
-        "Busqueda para el query: `{}`, exitosa! de {} registros, el mayor puntaje fue: `{}`",
+        "Busqueda para el query: `{}`, exitosa! de {} registros, el mayor puntaje fue: `{}` (umbral: {}), ",
         params.query,
         json.len(),
-        max_score.unwrap()
+        max_score.unwrap(),
+        app.ranking_score_threshold,
     );
 
     Json(json)
