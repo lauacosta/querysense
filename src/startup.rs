@@ -1,22 +1,15 @@
-use std::process::Child;
-use std::sync::Arc;
-
-use anyhow::{anyhow, Error};
 use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
-use http::{HeaderValue, Method};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
+use std::process::Child;
 use tokio::signal;
 use tower::ServiceBuilder;
-use tower_http::cors::{Any, CorsLayer};
-use tower_http::{
-    services::{ServeDir, ServeFile},
-    trace::{DefaultOnResponse, TraceLayer},
-};
+use tower_http::services::{ServeDir, ServeFile};
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, Level};
 
-use crate::configuration::FeatureState;
+use crate::configuration::{FeatureState, RequestConfig};
 use crate::{
     configuration::Settings,
     routes::{get_from_db, health_check, search},
@@ -34,6 +27,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub ranking_score_threshold: f64,
     pub cache: FeatureState,
+    pub request_config: RequestConfig,
 }
 
 impl Application {
@@ -67,7 +61,7 @@ impl Application {
 
         let port = listener.local_addr()?.port();
         let host = configuration.application.host;
-        let ranking_score_threshold = configuration.search_engine.filter_threshold;
+        let ranking_score_threshold = configuration.request_config.ranking_score_threshold;
         let cache = configuration.application.cache;
 
         let search_client = configuration
@@ -82,11 +76,14 @@ impl Application {
                 .create_if_missing(true),
         );
 
+        let request_config = configuration.request_config;
+
         let state = AppState {
             search_client,
             db,
             ranking_score_threshold,
             cache,
+            request_config,
         };
 
         let server = build_server(listener, state);
@@ -142,13 +139,14 @@ impl Application {
 }
 
 pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve<Router, Router> {
-    let cors = CorsLayer::new()
-        .allow_origin("http://0.0.0.0:3000".parse::<HeaderValue>().unwrap())
-        .allow_methods([Method::GET, Method::POST])
-        .allow_headers(Any);
+    // let cors = CorsLayer::new()
+    //     .allow_origin("http://0.0.0.0:3000".parse::<HeaderValue>().unwrap())
+    //     .allow_methods([Method::GET, Method::POST])
+    //     .allow_headers(Any);
 
     let server = Router::new()
         .route("/health_check", get(health_check))
+        // .route("/", get(index))
         .route("/search", get(search))
         .route("/historial", get(get_from_db))
         .nest_service(

@@ -6,6 +6,9 @@ async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv()?;
     tracing_subscriber::fmt::init();
 
+    let configuration = from_configuration().expect("Fallo al leer la configuración");
+    dbg!("{}", &configuration);
+
     let meili_bin = match start_meili() {
         Ok(bin) => bin,
         Err(err) => {
@@ -13,9 +16,6 @@ async fn main() -> anyhow::Result<()> {
             std::process::exit(1);
         }
     };
-
-    let configuration = from_configuration().expect("Fallo al leer la configuración");
-    dbg!("{}", &configuration);
 
     let app = Application::build(configuration).await?;
     tracing::info!(

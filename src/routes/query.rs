@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_number_from_string;
 
 use crate::{
-    configuration::{FeatureState, MAX_HITS},
+    configuration::{FeatureState, RequestConfig},
     startup::AppState,
 };
 
@@ -36,8 +36,8 @@ pub struct TneaData {
     experiencia: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     estudios_mas_recientes: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    // #[serde(rename = "_rankingScore")]
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "_rankingScore")]
     ranking_score: Option<f64>,
 }
 
@@ -67,39 +67,34 @@ pub(crate) async fn search(
         }
         FeatureState::Disabled => tracing::info!("El caché se encuentra desactivado!"),
     };
+
     let client = reqwest::Client::new();
     let response = send_request(
         &params.query,
         &params.doc,
         app.search_client.clone(),
         client.clone(),
+        app.request_config,
     )
     .await;
 
-    let mut max_score: Option<f64> = Some(0.0);
+    dbg!("{:?}", &response.hits.first().unwrap());
+
     let json: Vec<TneaData> = response
         .hits
         .into_iter()
-        .filter(|v| {
-            // TODO: Delegar este filtrado a Meilisearch.
-            if v.ranking_score > max_score {
-                max_score = v.ranking_score;
-            }
-            v.ranking_score >= Some(app.ranking_score_threshold)
-        })
         .map(|v| {
-            // TODO: Hacer correctamente este paso.
             let mut result = v.result;
             result.ranking_score = v.ranking_score;
             result
         })
         .collect();
 
-    let json_string =
-        serde_json::to_string(&json).expect("Fallo en serializar Vec<TneaData> a String");
-
     match app.cache {
         FeatureState::Enabled => {
+            let json_string =
+                serde_json::to_string(&json).expect("Fallo en serializar Vec<TneaData> a String");
+
             if let Err(err) = sqlx::query!(
                 "insert into historial (query, result) values (?,?)",
                 params.query,
@@ -118,10 +113,11 @@ pub(crate) async fn search(
     };
 
     tracing::info!(
-        "Busqueda para el query: `{}`, exitosa! de {} registros, el mayor puntaje fue: `{}` (umbral: {}), ",
+        "Busqueda para el query: `{}`, exitosa! de {} registros, el mayor puntaje fue: `{}` y el menor fue: `{}` (umbral: {})",
         params.query,
         json.len(),
-        max_score.unwrap(),
+         if json.first().is_some() {json.first().unwrap().ranking_score.unwrap_or(0.0)} else {0.0},
+         if json.last().is_some() {json.last().unwrap().ranking_score.unwrap_or(0.0)} else {0.0},
         app.ranking_score_threshold,
     );
 
@@ -133,34 +129,41 @@ async fn send_request(
     doc: &str,
     meili_client: meilisearch_sdk::client::Client,
     client: reqwest::Client,
+    request_config: RequestConfig,
 ) -> SearchResults<TneaData> {
-    #[derive(Debug, Serialize, Deserialize)]
+    // TODO: Ver como puedo evitar hacer esto.
+
+    #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
-    struct HybridSettings {
-        semantic_ratio: f32,
+    struct HybridBody {
+        semantic_ratio: f64,
         embedder: String,
     }
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
-    struct Request {
+    struct RequestBody {
         #[serde(rename = "q")]
         query: String,
-        hybrid: HybridSettings,
+        pub hybrid: HybridBody,
         #[serde(skip_serializing_if = "Option::is_none")]
-        limit: Option<usize>,
+        pub limit: Option<usize>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        show_ranking_score: Option<bool>,
+        pub show_ranking_score: Option<bool>,
+        pub ranking_score_threshold: f64,
+        pub show_ranking_score_details: Option<bool>,
     }
 
-    let query = Request {
-        query: query.into(),
-        hybrid: HybridSettings {
-            semantic_ratio: 0.5,
-            embedder: "default".into(),
+    let request = RequestBody {
+        query: query.to_string(),
+        hybrid: HybridBody {
+            semantic_ratio: request_config.hybrid.semantic_ratio,
+            embedder: request_config.hybrid.embedder,
         },
-        limit: Some(MAX_HITS),
-        show_ranking_score: Some(true),
+        limit: request_config.limit,
+        show_ranking_score: request_config.show_ranking_score,
+        ranking_score_threshold: request_config.ranking_score_threshold,
+        show_ranking_score_details: request_config.show_ranking_score_details,
     };
 
     let response = client
@@ -175,17 +178,15 @@ async fn send_request(
             ),
         )
         .header("Content-Type", "application/json")
-        .json(&query)
+        .json(&request)
         .send()
         .await
         .expect("Fallo al realizar una búsqueda. Asegurate de que el servidor de Meilli esté funcionando.");
 
     assert_eq!(response.status().as_u16(), 200);
 
-    let json: SearchResults<TneaData> = response
+    response
         .json()
         .await
-        .expect("Fallo la deserialización de la respuesta a SearchResults<TneaData>");
-
-    json
+        .expect("Fallo la deserialización de la respuesta a SearchResults<TneaData>")
 }

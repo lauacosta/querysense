@@ -11,8 +11,6 @@ use std::{
     time::Duration,
 };
 
-pub const MAX_HITS: usize = 80_000;
-
 // https://github.com/mehcode/config-rs/blob/master/examples/watch/main.rs
 lazy_static::lazy_static! {
     static ref SETTINGS: RwLock<Config> = {
@@ -23,6 +21,7 @@ lazy_static::lazy_static! {
         .unwrap_or_else(|_| "local".into())
         .try_into()
         .expect("Fallo al parsear APP_ENVIRONMENT.");
+
         let settings = config::Config::builder()
         .add_source(config::File::from(configuration_directory.join("base")).required(true))
         .add_source(
@@ -41,6 +40,7 @@ lazy_static::lazy_static! {
 pub struct Settings {
     pub application: ApplicationSettings,
     pub search_engine: MeiliSettings,
+    pub request_config: RequestConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,7 +57,6 @@ pub struct MeiliSettings {
     pub port: u16,
     pub host: String,
     // #[serde(deserialize_with = "as_f64")]
-    pub filter_threshold: f64,
     pub master_key: Secret<String>,
     pub settings: InnerSettings,
     pub experimental_features: MeiliExperimentalFeatures,
@@ -73,8 +72,24 @@ pub struct InnerSettings {
 pub struct MeiliExperimentalFeatures {
     pub vec_store: FeatureState,
     pub metrics: FeatureState,
-    pub score_details: FeatureState,
     pub logs_route: FeatureState,
+}
+
+#[derive(Debug, Deserialize, Clone, Serialize)]
+pub struct RequestConfig {
+    pub hybrid: HybridSettings,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_ranking_score: Option<bool>,
+    pub ranking_score_threshold: f64,
+    pub show_ranking_score_details: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct HybridSettings {
+    pub semantic_ratio: f64,
+    pub embedder: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -90,7 +105,7 @@ struct PaginationSetting {
 
 #[derive(Deserialize, Debug, Clone)]
 struct Embedders {
-    source: String,
+    source: EmbedderSource,
     api_key: Secret<String>,
     model: String,
 
@@ -130,7 +145,7 @@ impl MeiliSettings {
 
                         "embedders": {
                             "default": {
-                                "source": self.settings.embedders.source,
+                                "source": self.settings.embedders.source.as_str(),
                                 "apiKey": self.settings.embedders.api_key.expose_secret(),
                                 "model": self.settings.embedders.model,
                                 "documentTemplate": self.settings.embedders.document_template.expose_secret(),
@@ -232,6 +247,42 @@ pub fn from_configuration() -> Result<Settings, config::ConfigError> {
     });
 
     Ok(settings)
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub enum EmbedderSource {
+    OpenAi,
+    HuggingFace,
+    Ollama,
+    Rest,
+}
+
+impl EmbedderSource {
+    #[must_use]
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OpenAi => "openAi",
+            Self::HuggingFace => "huggingFace",
+            Self::Ollama => "ollama",
+            Self::Rest => "rest",
+        }
+    }
+}
+
+impl TryFrom<String> for EmbedderSource {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "ollama" => Ok(Self::Ollama),
+            "openai" => Ok(Self::OpenAi),
+            "rest" => Ok(Self::Rest),
+            "huggingface" => Ok(Self::HuggingFace),
+            other => Err(format!(
+                "{other} No es un proveedor soportado, usa 'ollama', 'hugginface', 'openai' o 'rest'",
+            )),
+        }
+    }
 }
 
 pub enum Environment {
