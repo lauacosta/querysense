@@ -7,3 +7,4 @@ data.ms
 .env
 tnea_gestion.db
 /configuration
+/dist

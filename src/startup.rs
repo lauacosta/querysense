@@ -1,3 +1,7 @@
+use std::process::Child;
+use std::sync::Arc;
+
+use anyhow::{anyhow, Error};
 use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
 use http::{HeaderValue, Method};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
@@ -45,9 +49,21 @@ impl Application {
             "{}:{}",
             configuration.application.host, configuration.application.port
         );
-        let listener = tokio::net::TcpListener::bind(address)
-            .await
-            .expect("Fallo al vincularse a la dirección");
+        let listener = match tokio::net::TcpListener::bind(address).await {
+            Ok(listener) => listener,
+            Err(err) => {
+                tracing::error!("{err}. Tratando con otro puerto...");
+                match tokio::net::TcpListener::bind(format!("{}:0", configuration.application.host))
+                    .await
+                {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        tracing::error!("No hay puertos disponibles, finalizando la aplicación...");
+                        return Err(err.into());
+                    }
+                }
+            }
+        };
 
         let port = listener.local_addr()?.port();
         let host = configuration.application.host;
@@ -92,10 +108,10 @@ impl Application {
     /// # Panics
     ///
     /// Entrará en pánico si no es capaz de instalar el handler requerido.
-    pub async fn run_until_stopped(self) -> Result<(), std::io::Error> {
+    pub async fn run_until_stopped(self, mut meili_bin: Child) -> Result<(), std::io::Error> {
         self.server
             // https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
-            .with_graceful_shutdown(async {
+            .with_graceful_shutdown(async move {
                 let ctrl_c = async {
                     signal::ctrl_c()
                         .await
@@ -113,8 +129,12 @@ impl Application {
                 let terminate = std::future::pending::<()>();
 
                 tokio::select! {
-                    () = ctrl_c => {},
-                    () = terminate => {},
+                    () = ctrl_c => {
+                        meili_bin.wait().unwrap();
+                    },
+                    () = terminate => {
+                        meili_bin.wait().unwrap();
+                    },
                 }
             })
             .await
@@ -160,8 +180,8 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
                         ),
                 )
                 .layer(RequestIdLayer),
-        )
-        .layer(cors);
+        );
+    // .layer(cors);
 
     axum::serve(listener, server)
 }

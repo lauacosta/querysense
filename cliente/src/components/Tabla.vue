@@ -39,7 +39,7 @@ defineProps<{
 </template>
 
 <style>
-#scrollHandler {
+.scrollHandler {
     width: 95%;
     height: 60rem;
     overflow-y: auto;
@@ -47,7 +47,7 @@ defineProps<{
     border: 1px solid #ccc;
 }
 
-#Tabla {
+.Tabla {
     /* table-layout: fixed; */
     width: 100%;
     border-collapse: collapse;
@@ -58,17 +58,17 @@ defineProps<{
     font-size: 1.1rem;
 }
 
-#Tabla th,
-#Tabla td {
+.Tabla th,
+.Tabla td {
     border: 3px solid rgb(36 36 36);
     padding: 0.5rem;
 }
 
-#Tabla td {
+.Tabla td {
     text-align: justified;
 }
 
-#Tabla tr:hover {
+.Tabla tr:hover {
     background-color: #f1f1f1;
 }
 
@@ -76,7 +76,8 @@ tr.hidden {
     visibility: hidden;
 }
 
-#Tabla th {
+.Tabla th {
+    content-visibility: auto;
     position: sticky;
     text-align: center;
     border-collapse: collapse;
