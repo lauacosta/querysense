@@ -13,6 +13,7 @@ defineProps<{
                     <th scope="col">Puntaje</th>
                     <th scope="col">Correo</th>
                     <th scope="col">Edad</th>
+                    <th scope="col">Sexo</th>
                     <th scope="col">Ciudad</th>
                     <th scope="col">Provincia</th>
                     <th scope="col">Estudios</th>
@@ -26,6 +27,7 @@ defineProps<{
                     <td>{{ row.ranking_score }} </td>
                     <td> {{ row.email }} </td>
                     <td> {{ row.edad }} </td>
+                    <td> {{ row.sexo }} </td>
                     <td> {{ row.ciudad }} </td>
                     <td> {{ row.provincia }} </td>
                     <td> {{ row.estudios }} </td>

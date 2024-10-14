@@ -1,70 +1,41 @@
-use std::{error::Error, path::PathBuf, process::Child, time::Duration};
+use std::panic;
 use tnea_gestion::{configuration::from_configuration, startup::Application};
+use tokio::{runtime::Runtime, sync::Mutex, task::futures};
+use tracing::Level;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv()?;
     tracing_subscriber::fmt::init();
 
-    let meili_bin = match start_meili() {
-        Ok(bin) => bin,
-        Err(err) => {
-            tracing::error!(err);
-            std::process::exit(1);
-        }
-    };
+    let span = tracing::span!(Level::INFO, "main");
+    let _guard = span.enter();
 
     let configuration = from_configuration().expect("Fallo al leer la configuración");
-    dbg!("{}", &configuration);
+    let config = configuration.clone();
 
-    let app = Application::build(configuration).await?;
+    let (app, meili_bin) = Application::build(configuration).await?;
+    let meili_bin = std::sync::Arc::new(Mutex::new(meili_bin));
+
+    panic::set_hook(Box::new(move |_info| {
+        let meili_clone = &meili_bin.clone();
+        std::thread::spawn(async move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let child = rt.block_on(meili_clone.clone().lock().await);
+            let _ = child.kill();
+            let _ = child.wait();
+            println!("Subprocess terminated due to panic");
+        });
+    }));
+
     tracing::info!(
         "El servidor está funcionando en http://{}:{} !",
         app.host(),
         app.port()
     );
-    let _ = app.run_until_stopped(meili_bin).await;
+
+    dbg!("{:?}", config);
+    let _ = app.run_until_stopped(meili_bin.clone()).await;
 
     Ok(())
-}
-
-fn start_meili() -> Result<Child, Box<dyn Error>> {
-    let meili_master_key = std::env::var("MEILI_MASTER_KEY")
-        .expect("Fallo en encontrar la variable de ambiente `MEILI_MASTER_KEY`");
-
-    let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    let meili_path = manifest_dir.join("meilisearch");
-
-    let meilisearch_bin = std::process::Command::new(meili_path)
-        .stderr(std::process::Stdio::inherit())
-        .args([
-            format!("--master-key={meili_master_key}").as_str(),
-            "--dump-dir",
-            "meili_data/dumps/",
-            "--no-analytics",
-        ])
-        .spawn()?;
-
-    let client = reqwest::blocking::Client::new();
-    let tries = 10;
-
-    for i in 0..tries {
-        let response = client.get("http://127.0.0.1:7700/health").send();
-        match response {
-            Ok(response) => {
-                if response.status().is_success() {
-                    tracing::info!("Meilisearch inició correctamente!");
-                    return Ok(meilisearch_bin);
-                }
-            }
-            Err(err) => {
-                tracing::error!("{}", err);
-                return Err(err.into());
-            }
-        };
-        tracing::info!("Esperando a que Meilisearch inicie... ({i}/{tries})");
-        std::thread::sleep(Duration::from_secs(2));
-    }
-
-    Err("Meilisearch no inició correctamente".into())
 }
