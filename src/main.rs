@@ -4,25 +4,25 @@ use tracing::Level;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv()?;
-    tracing_subscriber::fmt::init();
-
-    let span = tracing::span!(Level::INFO, "main");
+    let span = setup_tracing();
     let _guard = span.enter();
-    let configuration = from_configuration().expect("Fallo al leer la configuración");
-    let config = configuration.clone();
 
-    let (app, meili_bin) = Application::build(configuration).await?;
+    let configuration = from_configuration().expect("Fallo al leer la configuración");
+    dbg!("{:?}", &configuration);
+
+    let app = Application::build(configuration).await?;
 
     tracing::info!(
         "El servidor está funcionando en http://{}:{} !",
         app.host(),
         app.port()
     );
-
-    dbg!("{:?}", config);
-
-    // FIXME: Spawnear Meilisearch como un subproceso es una mala idea.
-    let _ = app.run_until_stopped(meili_bin).await;
+    let _ = app.run_until_stopped().await;
 
     Ok(())
+}
+
+pub fn setup_tracing() -> tracing::Span {
+    tracing_subscriber::fmt::init();
+    tracing::span!(Level::INFO, "main")
 }

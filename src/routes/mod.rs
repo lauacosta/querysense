@@ -6,7 +6,7 @@ mod query;
 pub use health_check::*;
 pub use historial::*;
 pub use index::*;
-pub use query::*;
+// pub use query::*;
 
 use serde::{Deserialize, Serialize};
 
@@ -16,4 +16,20 @@ pub struct Historial {
     pub query: String,
     pub result: String,
     pub timestamp: Option<chrono::NaiveDateTime>,
+}
+
+impl Historial {
+    pub fn new(
+        id: i64,
+        query: String,
+        result: String,
+        timestamp: Option<chrono::NaiveDateTime>,
+    ) -> Self {
+        Self {
+            id,
+            query,
+            result,
+            timestamp,
+        }
+    }
 }

@@ -1,251 +1,38 @@
+use core::fmt;
+use std::path::Path;
+use std::str::FromStr;
+use std::sync::Arc;
+
+use anyhow::anyhow;
 use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
-use http::Uri;
-use meilisearch_sdk::features::ExperimentalFeatures;
-use secrecy::{ExposeSecret, Secret};
-use serde_json::json;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::SqlitePool;
-use std::fmt::{Debug, Display};
-use std::path::{Path, PathBuf};
-use std::process::Child;
-use std::time::Duration;
+use rusqlite::ffi::sqlite3_auto_extension;
+use serde::de::DeserializeOwned;
+use sqlite_vec::sqlite3_vec_init;
 use tokio::signal;
+use tokio::sync::Mutex;
 use tower::ServiceBuilder;
-use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, Level};
 
-use crate::configuration::{
-    FeatureState, InnerSettings, MeiliExperimentalFeatures, MeiliSettings, RequestConfig,
-};
-use crate::TneaData;
+use crate::configuration::FeatureState;
+use crate::routes::index;
 use crate::{
     configuration::Settings,
-    routes::{get_from_db, health_check, search},
+    routes::{get_from_db, health_check},
 };
+use crate::{RegistroSQLITE, TneaData};
+
+#[derive(Debug, Clone)]
+pub struct AppState {
+    pub db: Arc<Mutex<rusqlite::Connection>>,
+    pub cache: FeatureState,
+}
 
 pub struct Application {
     pub port: u16,
     pub host: String,
     pub server: Serve<Router, Router>,
-}
-
-#[derive(Clone)]
-pub struct AppState {
-    pub search_client: meilisearch_sdk::client::Client,
-    pub db: SqlitePool,
-    pub ranking_score_threshold: f64,
-    pub cache: FeatureState,
-    pub request_config: RequestConfig,
-}
-
-#[derive(Debug)]
-struct MeiliService {
-    client: meilisearch_sdk::client::Client,
-    bin: Child,
-    experimental_features: MeiliExperimentalFeatures,
-    settings: InnerSettings,
-    address: Uri,
-    master_key: Secret<String>,
-}
-
-impl MeiliService {
-    #[tracing::instrument(name = "Creando un subproceso para MeiliSearch", skip(config))]
-    pub async fn start(config: MeiliSettings) -> anyhow::Result<Self> {
-        let address: Uri = format!("http://{}:{}", config.host, config.port)
-            .parse()
-            .expect("No es una URI bien conformada");
-
-        let meili_client = meilisearch_sdk::client::Client::new(
-            address.to_string(),
-            Some(config.master_key.expose_secret()),
-        )
-        .expect("Fallo al iniciar un cliente con el servidor especificado.");
-
-        let manifest_dir = PathBuf::from(
-            std::env::var("CARGO_MANIFEST_DIR")
-                .expect("Fallo en encontrar la variable de ambiente `CARGO_MANIFEST_DIR`"),
-        );
-        let meili_path = manifest_dir.join("meilisearch");
-
-        // FIXME: Spawnear Meilisearch como un subproceso es una mala idea.
-        let meilisearch_bin = std::process::Command::new(meili_path)
-            .stderr(std::process::Stdio::inherit())
-            .args([
-                format!("--master-key={}", config.master_key.expose_secret()).as_str(),
-                "--dump-dir",
-                "meili_data/dumps/",
-                "--no-analytics",
-            ])
-            .spawn()
-            .expect("Fallo en encontrar el ejecutable `meilisearch`.");
-
-        let tries = 10;
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        for i in 0..tries {
-            let response = match client.get(format!("{address}/health")).send().await {
-                Ok(resp) => resp,
-                Err(err) => {
-                    tracing::warn!(
-                        "Deberia ser capaz de consultar el estado de MeiliSearch. {err}"
-                    );
-                    tracing::info!("Esperando a que Meilisearch inicie... ({i}/{tries})");
-                    std::thread::sleep(Duration::from_secs(5));
-                    continue;
-                }
-            };
-
-            if response.status().as_u16() == 200 {
-                tracing::info!("Meilisearch inició correctamente!");
-                return Ok(Self {
-                    bin: meilisearch_bin,
-                    client: meili_client,
-                    settings: config.settings,
-                    master_key: config.master_key,
-                    address,
-                    experimental_features: config.experimental_features,
-                });
-            }
-            tracing::info!("Esperando a que Meilisearch inicie... ({i}/{tries})");
-            std::thread::sleep(Duration::from_secs(5));
-        }
-
-        Err(anyhow::anyhow!("Meilisearch no inició correctamente"))
-    }
-
-    /// # Errors
-    ///
-    /// Devolverá error si no es capaz de:
-    /// 1. Encontrar los archivos definidos por `files`.
-    /// 2. Serializar el contenido de los archivos en `TneaData`.
-    /// 3. Crear el cliente http.
-    /// 4. Modificar la configuración del índice con respecto a `vector_store`.
-    ///
-    /// # Panics
-    ///
-    /// Entrará en pánico si no es capaz de:
-    /// 1. Crear el índice `tnea`.
-    /// 2. Actualizar la configuración del índice `tnea`.
-    #[tracing::instrument(name = "Configurando MeiliSearch", skip(self, files))]
-    pub async fn setup_meili<P>(&self, files: Vec<P>) -> anyhow::Result<()>
-    where
-        P: AsRef<Path> + Display + Debug,
-    {
-        if let Err(err) = self.client.get_index("tnea").await {
-            tracing::warn!("{}", err);
-            tracing::info!("Creando el índice `tnea`!");
-            self.client
-                .create_index("tnea", Some("id"))
-                .await
-                .expect("Deberia ser capaz de crear el índice `tnea`");
-        }
-
-        let index = self
-            .client
-            .get_index("tnea")
-            .await
-            .expect("El índice debería estar creado");
-
-        if index
-            .get_stats()
-            .await
-            .expect("Fallo en obtener los stats del índice `tnea`")
-            .number_of_documents
-            == 0
-        {
-            tracing::info!("El índice `tnea` no tiene documentos cargados!");
-
-            let mut documents = Vec::new();
-
-            tracing::info!("Leyendo los archivos .csv para cargar los documentos en `tnea`...");
-            for file in files {
-                tracing::info!("Leyendo {file}...");
-                let mut reader = csv::ReaderBuilder::new()
-                    .flexible(true)
-                    .trim(csv::Trim::All)
-                    .has_headers(true)
-                    .from_path(format!("./csv/{file}"))
-                    .unwrap_or_else(|_| panic!("No se pudo encontrar el archivo {file}"));
-
-                for doc in reader.deserialize() {
-                    let val: TneaData = doc?;
-                    documents.push(val);
-                }
-            }
-            tracing::info!("Leyendo los archivos .csv para cargar los documentos en `tnea` listo!");
-
-            tracing::info!("Programando los datos leidos para su carga...");
-            let _ = self
-                .client
-                .index("tnea")
-                .add_documents(&documents, Some("id"))
-                .await
-                .expect("Fallo al añadir documentos al índice `tnea`");
-
-            tracing::info!("Programando los datos leidos para su carga listo!");
-        }
-
-        let http_client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()
-            .expect("Fallo al crear el cliente http");
-
-        let json_settings = {
-            match self.experimental_features.vec_store {
-                FeatureState::Enabled => {
-                    let mut features = ExperimentalFeatures::new(&self.client);
-                    features.set_vector_store(true).update().await?;
-                    json!(
-                    {
-                        "pagination": {
-                            "maxTotalHits": self.settings.pagination.max_total_hits
-                        },
-
-                        "embedders": {
-                            "default": {
-                                "source": self.settings.embedders.source.as_str(),
-                                "apiKey": self.settings.embedders.api_key.expose_secret(),
-                                "model": self.settings.embedders.model,
-                                "documentTemplate": self.settings.embedders.document_template.expose_secret(),
-                                "dimensions": self.settings.embedders.dimensions
-                            }
-                        }
-                    })
-                }
-                FeatureState::Disabled => {
-                    let mut features = ExperimentalFeatures::new(&self.client);
-                    features.set_vector_store(false).update().await?;
-                    json!(
-                    {
-                        "pagination": {
-                            "maxTotalHits": self.settings.pagination.max_total_hits
-                        },
-                    })
-                }
-            }
-        };
-
-        let response = http_client
-            .patch(format!("{}/indexes/tnea/settings", self.address))
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.master_key.expose_secret()),
-            )
-            .header("Content-Type", "application/json")
-            .json(&json_settings)
-            .send()
-            .await
-            .expect("Fallo al enviar el http request hacia el servidor para configurar el índice `tnea`");
-
-        assert_eq!(response.status().as_u16(), 202);
-        tracing::info!("El índice 'tnea' se ha configurado exitosamente!");
-
-        Ok(())
-    }
 }
 
 impl Application {
@@ -257,7 +44,7 @@ impl Application {
     /// 1. Vincular un `tokio::net::TcpListener` a la dirección dada.
     /// 2. Falla en conectarse con el servidor de `MeiliSearch`.
     #[tracing::instrument(name = "Construyendo la aplicación.", skip(configuration))]
-    pub async fn build(configuration: Settings) -> anyhow::Result<(Self, Child)> {
+    pub async fn build(configuration: Settings) -> anyhow::Result<Self> {
         let address = format!(
             "{}:{}",
             configuration.application.host, configuration.application.port
@@ -288,48 +75,21 @@ impl Application {
 
         tracing::info!("Definiendo la direccion HTTP listo!");
 
-        let ranking_score_threshold = configuration.request_config.ranking_score_threshold;
+        let data: Vec<TneaData> = parse_and_embed(
+            "./csv/",
+            Template::from_str(&configuration.application.template)?,
+        )?;
+
+        let db = Arc::new(Mutex::new(setup_sqlite(data)?));
         let cache = configuration.application.cache;
 
-        tracing::info!("Escaneando los archivos .csv disponibles...");
-        let mut files = Vec::new();
-
-        for file in std::fs::read_dir("./csv/").expect("No se encuentra el directorio /csv/") {
-            let path = file?.path();
-
-            if path.is_file() && path.extension().is_some_and(|str| str == "csv") {
-                if let Some(filename) = path.file_name() {
-                    files.push(filename.to_string_lossy().to_string());
-                }
-            }
-        }
-        tracing::info!("Escaneando los archivos .csv disponibles... listo!");
-
-        let service = MeiliService::start(configuration.search_engine).await?;
-        service.setup_meili(files).await?;
-
-        let db = SqlitePoolOptions::new().connect_lazy_with(
-            SqliteConnectOptions::new()
-                .extension("vec0")
-                .filename("./tnea_gestion.db")
-                .create_if_missing(true),
-        );
-
-        let request_config = configuration.request_config;
-
-        let state = AppState {
-            search_client: service.client,
-            db,
-            ranking_score_threshold,
-            cache,
-            request_config,
-        };
+        let state = AppState { db, cache };
 
         let server = build_server(listener, state);
 
         tracing::info!("Construyendo la aplicación listo!");
 
-        Ok((Self { port, host, server }, service.bin))
+        Ok(Self { port, host, server })
     }
 
     pub fn port(&self) -> u16 {
@@ -346,7 +106,7 @@ impl Application {
     /// # Panics
     ///
     /// Entrará en pánico si no es capaz de instalar el handler requerido.
-    pub async fn run_until_stopped(self, mut meili_bin: Child) -> Result<(), std::io::Error> {
+    pub async fn run_until_stopped(self) -> std::io::Result<()> {
         self.server
             // https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
             .with_graceful_shutdown(async move {
@@ -368,14 +128,8 @@ impl Application {
 
                 tokio::select! {
                     () = ctrl_c => {
-                        tracing::info!("Apagando el servidor!");
-                        meili_bin.wait().expect("Meilisearch no estaba siendo ejecutado!");
-                        tracing::info!("Apagando Meilisearch!");
                     },
                     () = terminate => {
-                        tracing::info!("Apagando el servidor!");
-                        meili_bin.wait().expect("Meilisearch no estaba siendo ejecutado!");
-                        tracing::info!("Apagando Meilisearch!");
                     },
                 }
             })
@@ -384,20 +138,15 @@ impl Application {
 }
 
 pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve<Router, Router> {
-    // let cors = CorsLayer::new()
-    //     .allow_origin("http://0.0.0.0:3000".parse::<HeaderValue>().unwrap())
-    //     .allow_methods([Method::GET, Method::POST])
-    //     .allow_headers(Any);
-
     let server = Router::new()
         .route("/health_check", get(health_check))
-        // .route("/", get(index))
-        .route("/search", get(search))
+        .route("/", get(index))
+        // .route("/search", get(search))
         .route("/historial", get(get_from_db))
-        .nest_service(
-            "/",
-            ServeDir::new("./dist").not_found_service(ServeFile::new("./fallout.html")),
-        )
+        // .nest_service(
+        //     "/",
+        //     ServeDir::new("./dist").not_found_service(ServeFile::new("./fallout.html")),
+        // )
         .with_state(state)
         .layer(
             ServiceBuilder::new()
@@ -424,7 +173,222 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
                 )
                 .layer(RequestIdLayer),
         );
-    // .layer(cors);
 
     axum::serve(listener, server)
+}
+
+fn setup_sqlite(data: Vec<TneaData>) -> anyhow::Result<rusqlite::Connection> {
+    unsafe {
+        sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
+    }
+    let path = std::env::var("DATABASE_URL").map_err(|err| {
+        anyhow!(
+            "La variable de ambiente `DATABASE_URL` no fue encontrada. {}",
+            err
+        )
+    })?;
+
+    let db = rusqlite::Connection::open(path)?;
+    let (sqlite_version, vec_version): (String, String) =
+        db.query_row("select sqlite_version(), vec_version()", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+
+    tracing::info!("sqlite_version={sqlite_version}, vec_version={vec_version}");
+
+    tracing::info!("Creando las tablas historial, tnea...");
+    db.execute_batch(
+        "create table if not exists historial (
+            id integer primary key,
+            query text not null unique,
+            result text not null,
+            timestamp datetime default current_timestamp
+        );
+
+        create index if not exists idx_query_timestamp on historial(query, timestamp);
+
+        create table if not exists tnea(
+            id integer primary key,
+            email text,
+            nombre text,
+            sexo text,
+            fecha_nacimiento text,
+            edad integer not null,
+            provincia text,
+            ciudad text,
+            descripcion text,
+            estudios text,
+            experiencia text,
+            estudios_mas_recientes text
+        );
+    ",
+    )
+    .map_err(|err| anyhow!(err))
+    .expect("Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite");
+
+    tracing::info!("Creando las tablas historial, tnea... listo!");
+
+    tracing::info!("Abriendo transacción para insertar datos en la tabla tnea!");
+
+    db.execute("BEGIN TRANSACTION", []).expect(
+        "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
+    );
+
+    {
+        let mut statement = db.prepare(
+            "insert into tnea (
+            id,
+            email,
+            nombre,
+            sexo,
+            fecha_nacimiento,
+            edad,
+            provincia,
+            ciudad,
+            descripcion,
+            estudios,
+            estudios_mas_recientes,
+            experiencia
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )?;
+
+        for d in data {
+            let TneaData {
+                id,
+                email,
+                nombre,
+                sexo,
+                fecha_nacimiento,
+                edad,
+                provincia,
+                ciudad,
+                descripcion,
+                estudios,
+                estudios_mas_recientes,
+                experiencia,
+            } = d;
+
+            statement.execute((
+                id,
+                email,
+                nombre,
+                sexo,
+                fecha_nacimiento,
+                edad,
+                provincia,
+                ciudad,
+                descripcion,
+                estudios,
+                estudios_mas_recientes,
+                experiencia,
+            ))?;
+        }
+    }
+
+    let num = db.execute("COMMIT", []).expect(
+        "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
+    );
+    tracing::info!("Se insertaron {num} columnas!");
+
+    Ok(db)
+}
+
+fn parse_and_embed<R, P>(path: P, template: Template) -> anyhow::Result<Vec<R>>
+where
+    R: RegistroSQLITE + DeserializeOwned,
+    P: AsRef<Path> + fmt::Display,
+{
+    let mut datasources = Vec::new();
+
+    tracing::info!("Escaneando los archivos .csv disponibles...");
+
+    for file in std::fs::read_dir(&path)? {
+        let path = file?.path();
+
+        if path.is_file() && path.extension().is_some_and(|str| str == "csv") {
+            if let Some(filename) = path.file_name() {
+                datasources.push(filename.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    tracing::info!("Escaneando los archivos .csv disponibles... listo!");
+
+    let mut reader_config = csv::ReaderBuilder::new();
+    let mut result = Vec::new();
+
+    for source in datasources {
+        tracing::info!("Leyendo {}{}...", path, source);
+        let mut reader = reader_config
+            .flexible(true)
+            .has_headers(true)
+            .from_path(format!("{path}{source}"))?;
+
+        let headers: Vec<String> = reader
+            .headers()?
+            .into_iter()
+            .map(|v| v.to_string())
+            .collect();
+
+        for field in &template.fields {
+            if !headers.contains(field) {
+                return Err(anyhow::anyhow!(
+                    "El archivo /{}/{} no tiene el header {}.",
+                    path,
+                    source,
+                    field
+                ));
+            }
+        }
+
+        let data = reader
+                .deserialize()
+                .collect::<Result<Vec<R>, csv::Error>>()
+                .map_err(|err| anyhow!("{source} no pudo se deserializado. Hay que controlar que tenga los headers correctos. Err: {err}"))?;
+
+        result.extend(data);
+
+        tracing::info!("Leyendo {}{}... listo!", path, source);
+    }
+
+    Ok(result)
+}
+
+#[derive(Debug)]
+pub struct Template {
+    pub template: String,
+    pub fields: Vec<String>,
+}
+
+impl FromStr for Template {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(anyhow::anyhow!("Un template no puede ser un string vacío"));
+        }
+
+        let mut start = 0;
+        let separator = "{{";
+        let separator_len = separator.len();
+        let mut fields = Vec::new();
+
+        while let Some(open_idx) = s[start..].find("{{") {
+            if let Some(close_idx) = s[start + open_idx..].find("}}") {
+                let field = &s[start + open_idx + separator_len..start + open_idx + close_idx];
+
+                fields.push(field.trim().to_string());
+
+                start += open_idx + close_idx + separator_len;
+            } else {
+                return Err(anyhow::anyhow!("El template esta mal conformado"));
+            }
+        }
+
+        Ok(Self {
+            template: s.to_string(),
+            fields,
+        })
+    }
 }

@@ -1,10 +1,7 @@
 use config::Config;
-use meilisearch_sdk::features::ExperimentalFeatures;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use secrecy::{ExposeSecret, Secret};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_aux::prelude::deserialize_number_from_string;
-use serde_json::json;
 use std::{
     path::Path,
     sync::{mpsc::channel, RwLock},
@@ -39,8 +36,6 @@ lazy_static::lazy_static! {
 #[derive(Debug, Deserialize, Clone)]
 pub struct Settings {
     pub application: ApplicationSettings,
-    pub search_engine: MeiliSettings,
-    pub request_config: RequestConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -49,144 +44,13 @@ pub struct ApplicationSettings {
     pub port: u16,
     pub host: String,
     pub cache: FeatureState,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct MeiliSettings {
-    #[serde(deserialize_with = "deserialize_number_from_string")]
-    pub port: u16,
-    pub host: String,
-    // #[serde(deserialize_with = "as_f64")]
-    pub master_key: Secret<String>,
-    pub settings: InnerSettings,
-    pub experimental_features: MeiliExperimentalFeatures,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct InnerSettings {
-    pub pagination: PaginationSetting,
-    pub embedders: Embedders,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct MeiliExperimentalFeatures {
-    pub vec_store: FeatureState,
-    pub metrics: FeatureState,
-    pub logs_route: FeatureState,
-}
-
-#[derive(Debug, Deserialize, Clone, Serialize)]
-pub struct RequestConfig {
-    pub hybrid: HybridSettings,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub limit: Option<usize>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub show_ranking_score: Option<bool>,
-    pub ranking_score_threshold: f64,
-    pub show_ranking_score_details: Option<bool>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct HybridSettings {
-    pub semantic_ratio: f64,
-    pub embedder: String,
+    pub template: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub enum FeatureState {
     Enabled,
     Disabled,
-}
-
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-pub struct PaginationSetting {
-    pub max_total_hits: usize,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct Embedders {
-    pub source: EmbedderSource,
-    pub api_key: Secret<String>,
-    pub model: String,
-    pub document_template: Secret<String>,
-    pub dimensions: usize,
-}
-
-impl MeiliSettings {
-    /// # Errors
-    ///
-    /// Devolverá error si no es capaz de:
-    /// 1. Conectarse a la sesión de `MeiliSearch` utilizando el SDK.
-    /// 2. Actualizar la configuración del índice `tnea`.
-    ///
-    /// # Panics
-    ///
-    /// Entrará en pánico si no es capaz de:
-    /// 1. Conectarse a la sesión de `MeiliSearch` utilizando el SDK.
-    /// 2. Actualizar la configuración del índice `tnea`.
-    pub async fn connect_to_meili(&self) -> anyhow::Result<meilisearch_sdk::client::Client> {
-        let address = format!("http://{}:{}", self.host, self.port);
-
-        let meili_client =
-            meilisearch_sdk::client::Client::new(&address, Some(self.master_key.expose_secret()))
-                .expect("Fallo al iniciar un cliente con el servidor especificado.");
-
-        let json_settings = {
-            match self.experimental_features.vec_store {
-                FeatureState::Enabled => {
-                    let mut features = ExperimentalFeatures::new(&meili_client);
-                    features.set_vector_store(true).update().await?;
-                    json!(
-                    {
-                        "pagination": {
-                            "maxTotalHits": self.settings.pagination.max_total_hits
-                        },
-
-                        "embedders": {
-                            "default": {
-                                "source": self.settings.embedders.source.as_str(),
-                                "apiKey": self.settings.embedders.api_key.expose_secret(),
-                                "model": self.settings.embedders.model,
-                                "documentTemplate": self.settings.embedders.document_template.expose_secret(),
-                                "dimensions": self.settings.embedders.dimensions
-                            }
-                        }
-                    })
-                }
-                FeatureState::Disabled => {
-                    let mut features = ExperimentalFeatures::new(&meili_client);
-                    features.set_vector_store(false).update().await?;
-                    json!(
-                    {
-                        "pagination": {
-                            "maxTotalHits": self.settings.pagination.max_total_hits
-                        },
-                    })
-                }
-            }
-        };
-
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        let response = client
-            .patch(format!("{address}/indexes/tnea/settings"))
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.master_key.expose_secret()),
-            )
-            .header("Content-Type", "application/json")
-            .json(&json_settings)
-            .send()
-            .await
-            .expect("Fallo al enviar el http request hacia el servidor para configurar el índice `tnea`");
-
-        assert_eq!(response.status().as_u16(), 202);
-        tracing::info!("El índice 'tnea' se ha configurado exitosamente!");
-
-        Ok(meili_client)
-    }
 }
 
 /// # Errors

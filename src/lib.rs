@@ -26,6 +26,7 @@ pub struct TneaData {
     experiencia: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     estudios_mas_recientes: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    ranking_score: Option<f64>,
 }
+
+trait RegistroSQLITE {}
+impl RegistroSQLITE for TneaData {}
