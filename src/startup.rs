@@ -1,3 +1,5 @@
+use axum::extract::Path as AxumPath;
+use axum::response::IntoResponse;
 use core::fmt;
 use std::path::Path;
 use std::str::FromStr;
@@ -5,6 +7,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
+use http::{header, HeaderMap, StatusCode};
 use rusqlite::ffi::sqlite3_auto_extension;
 use serde::de::DeserializeOwned;
 use sqlite_vec::sqlite3_vec_init;
@@ -75,19 +78,15 @@ impl Application {
 
         tracing::info!("Definiendo la direccion HTTP listo!");
 
-        let data: Vec<TneaData> = parse_and_embed(
-            "./csv/",
-            Template::from_str(&configuration.application.template)?,
-        )?;
+        let template = Template::from_str(&configuration.application.template)?;
+        let data: Vec<TneaData> = parse_and_embed("./csv/", &template)?;
 
-        let db = Arc::new(Mutex::new(setup_sqlite(data)?));
+        let db = Arc::new(Mutex::new(setup_sqlite(data, &template)?));
         let cache = configuration.application.cache;
 
         let state = AppState { db, cache };
 
         let server = build_server(listener, state);
-
-        tracing::info!("Construyendo la aplicación listo!");
 
         Ok(Self { port, host, server })
     }
@@ -139,7 +138,7 @@ impl Application {
 
 pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve<Router, Router> {
     let server = Router::new()
-        .route("/health_check", get(health_check))
+        .route("/health", get(health_check))
         .route("/", get(index))
         // .route("/search", get(search))
         .route("/historial", get(get_from_db))
@@ -147,6 +146,8 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
         //     "/",
         //     ServeDir::new("./dist").not_found_service(ServeFile::new("./fallout.html")),
         // )
+        // .nest_service("/static", ServeDir::new("./templates/static"))
+        .route("/_assets/*path", get(handle_assets))
         .with_state(state)
         .layer(
             ServiceBuilder::new()
@@ -177,7 +178,7 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
     axum::serve(listener, server)
 }
 
-fn setup_sqlite(data: Vec<TneaData>) -> anyhow::Result<rusqlite::Connection> {
+fn setup_sqlite(data: Vec<TneaData>, template: &Template) -> anyhow::Result<rusqlite::Connection> {
     unsafe {
         sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
     }
@@ -196,9 +197,11 @@ fn setup_sqlite(data: Vec<TneaData>) -> anyhow::Result<rusqlite::Connection> {
 
     tracing::info!("sqlite_version={sqlite_version}, vec_version={vec_version}");
 
-    tracing::info!("Creando las tablas historial, tnea...");
+    let fields_str = template.fields.join(",");
+    dbg!("{:?}", &fields_str);
     db.execute_batch(
-        "create table if not exists historial (
+        format!(
+            "create table if not exists historial (
             id integer primary key,
             query text not null unique,
             result text not null,
@@ -221,12 +224,25 @@ fn setup_sqlite(data: Vec<TneaData>) -> anyhow::Result<rusqlite::Connection> {
             experiencia text,
             estudios_mas_recientes text
         );
-    ",
+
+        create virtual table if not exists fts_tnea using fts5(
+        {fields_str},
+        content='tnea', content_rowid='id'
+        );
+
+        "
+        )
+        .as_str(),
     )
     .map_err(|err| anyhow!(err))
     .expect("Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite");
 
-    tracing::info!("Creando las tablas historial, tnea... listo!");
+    let num: usize = db.query_row("select count(*) from tnea", [], |row| row.get(0))?;
+
+    // TODO: Añadir la condicion de que caduquen los datos.
+    if num != 0 {
+        return Ok(db);
+    }
 
     tracing::info!("Abriendo transacción para insertar datos en la tabla tnea!");
 
@@ -234,6 +250,7 @@ fn setup_sqlite(data: Vec<TneaData>) -> anyhow::Result<rusqlite::Connection> {
         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
     );
 
+    let mut inserted: usize = 0;
     {
         let mut statement = db.prepare(
             "insert into tnea (
@@ -283,18 +300,38 @@ fn setup_sqlite(data: Vec<TneaData>) -> anyhow::Result<rusqlite::Connection> {
                 estudios_mas_recientes,
                 experiencia,
             ))?;
+            inserted += 1;
         }
     }
+    tracing::info!("Se insertaron {inserted} columnas!");
 
-    let num = db.execute("COMMIT", []).expect(
+    db.execute("COMMIT", []).expect(
         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
     );
-    tracing::info!("Se insertaron {num} columnas!");
+
+    tracing::info!("Insertando nuevas columnas en fts_nea...");
+
+    db.execute_batch(
+        format!(
+            "
+            insert into fts_tnea(rowid, {fields_str})
+            select rowid, {fields_str}
+            from tnea;
+
+            insert into fts_tnea(fts_tnea) values('optimize');
+        "
+        )
+        .as_str(),
+    )
+    .map_err(|err| anyhow!(err))
+    .expect("Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite");
+
+    tracing::info!("Insertando nuevas columnas en fts_nea... listo!");
 
     Ok(db)
 }
 
-fn parse_and_embed<R, P>(path: P, template: Template) -> anyhow::Result<Vec<R>>
+fn parse_and_embed<R, P>(path: P, template: &Template) -> anyhow::Result<Vec<R>>
 where
     R: RegistroSQLITE + DeserializeOwned,
     P: AsRef<Path> + fmt::Display,
@@ -390,5 +427,17 @@ impl FromStr for Template {
             template: s.to_string(),
             fields,
         })
+    }
+}
+
+static MAIN_CSS: &str = include_str!("../assets/index.css");
+async fn handle_assets(AxumPath(path): AxumPath<String>) -> impl IntoResponse {
+    let mut headers = HeaderMap::new();
+
+    if path == "index.css" {
+        headers.insert(header::CONTENT_TYPE, "text/css".parse().unwrap());
+        (StatusCode::OK, headers, MAIN_CSS)
+    } else {
+        (StatusCode::NOT_FOUND, headers, "")
     }
 }
