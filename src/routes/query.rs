@@ -108,7 +108,7 @@ async fn send_request(
 ) -> SearchResults<TneaData> {
     // TODO: Ver como puedo evitar hacer esto.
 
-    #[derive(Serialize, Deserialize, Debug)]
+    #[derive(Serialize, Debug)]
     #[serde(rename_all = "camelCase")]
     struct HybridBody {
         semantic_ratio: f64,

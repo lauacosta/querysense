@@ -1,8 +1,10 @@
 use config::Config;
+use meilisearch_sdk::features::ExperimentalFeatures;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use secrecy::Secret;
+use secrecy::{ExposeSecret, Secret};
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_number_from_string;
+use serde_json::json;
 use std::{
     path::Path,
     sync::{mpsc::channel, RwLock},
@@ -108,6 +110,83 @@ pub struct Embedders {
     pub model: String,
     pub document_template: Secret<String>,
     pub dimensions: usize,
+}
+
+impl MeiliSettings {
+    /// # Errors
+    ///
+    /// Devolverá error si no es capaz de:
+    /// 1. Conectarse a la sesión de `MeiliSearch` utilizando el SDK.
+    /// 2. Actualizar la configuración del índice `tnea`.
+    ///
+    /// # Panics
+    ///
+    /// Entrará en pánico si no es capaz de:
+    /// 1. Conectarse a la sesión de `MeiliSearch` utilizando el SDK.
+    /// 2. Actualizar la configuración del índice `tnea`.
+    pub async fn connect_to_meili(&self) -> anyhow::Result<meilisearch_sdk::client::Client> {
+        let address = format!("http://{}:{}", self.host, self.port);
+
+        let meili_client =
+            meilisearch_sdk::client::Client::new(&address, Some(self.master_key.expose_secret()))
+                .expect("Fallo al iniciar un cliente con el servidor especificado.");
+
+        let json_settings = {
+            match self.experimental_features.vec_store {
+                FeatureState::Enabled => {
+                    let mut features = ExperimentalFeatures::new(&meili_client);
+                    features.set_vector_store(true).update().await?;
+                    json!(
+                    {
+                        "pagination": {
+                            "maxTotalHits": self.settings.pagination.max_total_hits
+                        },
+
+                        "embedders": {
+                            "default": {
+                                "source": self.settings.embedders.source.as_str(),
+                                "apiKey": self.settings.embedders.api_key.expose_secret(),
+                                "model": self.settings.embedders.model,
+                                "documentTemplate": self.settings.embedders.document_template.expose_secret(),
+                                "dimensions": self.settings.embedders.dimensions
+                            }
+                        }
+                    })
+                }
+                FeatureState::Disabled => {
+                    let mut features = ExperimentalFeatures::new(&meili_client);
+                    features.set_vector_store(false).update().await?;
+                    json!(
+                    {
+                        "pagination": {
+                            "maxTotalHits": self.settings.pagination.max_total_hits
+                        },
+                    })
+                }
+            }
+        };
+
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()?;
+
+        let response = client
+            .patch(format!("{address}/indexes/tnea/settings"))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.master_key.expose_secret()),
+            )
+            .header("Content-Type", "application/json")
+            .json(&json_settings)
+            .send()
+            .await
+            .expect("Fallo al enviar el http request hacia el servidor para configurar el índice `tnea`");
+
+        assert_eq!(response.status().as_u16(), 202);
+        tracing::info!("El índice 'tnea' se ha configurado exitosamente!");
+
+        Ok(meili_client)
+    }
 }
 
 /// # Errors

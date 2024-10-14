@@ -69,6 +69,7 @@ impl MeiliService {
         );
         let meili_path = manifest_dir.join("meilisearch");
 
+        // FIXME: Spawnear Meilisearch como un subproceso es una mala idea.
         let meilisearch_bin = std::process::Command::new(meili_path)
             .stderr(std::process::Stdio::inherit())
             .args([
@@ -284,6 +285,7 @@ impl Application {
             .expect("Fallo al encontrar la local address")
             .port();
         let host = configuration.application.host;
+
         tracing::info!("Definiendo la direccion HTTP listo!");
 
         let ranking_score_threshold = configuration.request_config.ranking_score_threshold;
