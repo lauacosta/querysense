@@ -31,6 +31,20 @@ lazy_static::lazy_static! {
 
         RwLock::new(settings)
     };
+
+    // pub static ref DATABASE: Arc<Mutex<rusqlite::Connection>> = {
+    //     unsafe {
+    //         sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
+    //     }
+    //     let path = std::env::var("DATABASE_URL").map_err(|err| {
+    //         anyhow::anyhow!(
+    //             "La variable de ambiente `DATABASE_URL` no fue encontrada. {}",
+    //             err
+    //         )
+    //     }).unwrap();
+
+    //     Arc::new(Mutex::new(rusqlite::Connection::open(path).unwrap()))
+    // };
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -70,7 +84,7 @@ pub enum FeatureState {
 /// 4. Deserializar el archivo de configuracion en `Settings`
 #[tracing::instrument]
 pub fn from_configuration() -> Result<Settings, config::ConfigError> {
-    tracing::info!("Leyendo la configuracion...");
+    tracing::debug!("Leyendo la configuracion...");
     let settings: Settings = SETTINGS
         .read()
         .expect("Fallo al leer RwLock<Config>")
@@ -111,7 +125,7 @@ pub fn from_configuration() -> Result<Settings, config::ConfigError> {
         // }
     });
 
-    tracing::info!("Leyendo la configuracion listo!");
+    tracing::debug!("Leyendo la configuracion listo!");
     Ok(settings)
 }
 

@@ -9,7 +9,6 @@ pub struct Index {
 
 impl Default for Index {
     fn default() -> Self {
-        println!("Aca?");
         Self {
             msg: "".to_string(),
             table: vec![TneaDisplay::default()],
@@ -19,11 +18,8 @@ impl Default for Index {
 
 #[derive(Debug, Clone, Default)]
 pub struct TneaDisplay {
-    id: usize,
     email: String,
-    nombre: String,
     sexo: String,
-    fecha_nacimiento: String,
     edad: usize,
     provincia: String,
     ciudad: String,
@@ -35,11 +31,8 @@ pub struct TneaDisplay {
 
 impl TneaDisplay {
     pub fn new(
-        id: usize,
         email: String,
-        nombre: String,
         sexo: String,
-        fecha_nacimiento: String,
         edad: usize,
         provincia: String,
         ciudad: String,
@@ -49,11 +42,8 @@ impl TneaDisplay {
         estudios_mas_recientes: String,
     ) -> Self {
         Self {
-            id,
             email,
-            nombre,
             sexo,
-            fecha_nacimiento,
             edad,
             provincia,
             ciudad,

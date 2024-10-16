@@ -1,7 +1,7 @@
 mod health_check;
 mod historial;
 mod index;
-mod query;
+mod search;
 
 pub use health_check::*;
 pub use historial::*;

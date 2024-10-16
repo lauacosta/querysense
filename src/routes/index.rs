@@ -7,15 +7,11 @@ use axum::extract::State;
 #[allow(clippy::unused_async)]
 #[axum::debug_handler]
 pub async fn index(State(AppState { db, .. }): State<AppState>) -> Index {
-    tracing::info!("Aca!?>?");
     let db = db.lock().await;
     let mut statement = match db.prepare(
         "select
-            id,
             email,
-            nombre,
             sexo,
-            fecha_nacimiento,
             edad,
             provincia,
             ciudad,
@@ -23,7 +19,7 @@ pub async fn index(State(AppState { db, .. }): State<AppState>) -> Index {
             estudios,
             experiencia,
             estudios_mas_recientes
-        from tnea
+        from tnea limit 100;
     ",
     ) {
         Ok(stmt) => stmt,
@@ -33,27 +29,20 @@ pub async fn index(State(AppState { db, .. }): State<AppState>) -> Index {
         }
     };
 
-    tracing::info!("Aca!?>?2");
     let rows = match statement.query_map([], |row| {
-        let id = row.get(0).unwrap_or_default();
-        let email = row.get(1).unwrap_or_default();
-        let nombre = row.get(2).unwrap_or_default();
-        let sexo = row.get(3).unwrap_or_default();
-        let fecha_nacimiento = row.get(4).unwrap_or_default();
-        let edad = row.get(5).unwrap_or_default();
-        let provincia = row.get(6).unwrap_or_default();
-        let ciudad = row.get(7).unwrap_or_default();
-        let descripcion = row.get(8).unwrap_or_default();
-        let estudios = row.get(9).unwrap_or_default();
-        let experiencia = row.get(10).unwrap_or_default();
-        let estudios_mas_recientes = row.get(11).unwrap_or_default();
+        let email = row.get(0).unwrap_or_default();
+        let sexo = row.get(1).unwrap_or_default();
+        let edad = row.get(2).unwrap_or_default();
+        let provincia = row.get(3).unwrap_or_default();
+        let ciudad = row.get(4).unwrap_or_default();
+        let descripcion = row.get(5).unwrap_or_default();
+        let estudios = row.get(6).unwrap_or_default();
+        let experiencia = row.get(7).unwrap_or_default();
+        let estudios_mas_recientes = row.get(8).unwrap_or_default();
 
-        Ok(TneaDisplay::new(
-            id,
+        let data = TneaDisplay::new(
             email,
-            nombre,
             sexo,
-            fecha_nacimiento,
             edad,
             provincia,
             ciudad,
@@ -61,7 +50,11 @@ pub async fn index(State(AppState { db, .. }): State<AppState>) -> Index {
             estudios,
             experiencia,
             estudios_mas_recientes,
-        ))
+        );
+
+        dbg!("{:?}", &data);
+
+        Ok(data)
     }) {
         Ok(r) => r,
         Err(err) => {

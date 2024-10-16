@@ -36,3 +36,4 @@ csv = "1.3.0"
 sqlite-vec = "0.1.3"
 rusqlite = { version = "0.32.0", features = ["bundled"] }
 zerocopy = "0.8.5"
+clap = { version = "4.5.20", features = ["derive"] }
