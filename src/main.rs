@@ -86,6 +86,8 @@ fn main() -> anyhow::Result<()> {
                 return Ok(());
             }
 
+            let start = std::time::Instant::now();
+
             let data: Vec<TneaData> = parse_and_embed("./csv/", &template)?;
 
             tracing::info!(
@@ -99,7 +101,6 @@ fn main() -> anyhow::Result<()> {
                 let mut statement = db.prepare(
                     "
                     insert into tnea_raw (
-                        id,
                         email,
                         nombre,
                         sexo,
@@ -111,12 +112,11 @@ fn main() -> anyhow::Result<()> {
                         estudios,
                         estudios_mas_recientes,
                         experiencia
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 )?;
 
                 for d in &data {
                     let TneaData {
-                        id,
                         email,
                         nombre,
                         sexo,
@@ -131,7 +131,6 @@ fn main() -> anyhow::Result<()> {
                     } = d;
 
                     statement.execute((
-                        id,
                         email,
                         nombre,
                         sexo,
@@ -155,17 +154,15 @@ fn main() -> anyhow::Result<()> {
                 let mut statement = db.prepare(
                     "
                     insert into tnea (
-                        id,
                         email,
                         edad,
                         sexo,
                         template
-                    ) VALUES (?, ?, ?, ?, ?)",
+                    ) VALUES (?, ?, ?, ?)",
                 )?;
 
                 for d in data {
                     let TneaData {
-                        id,
                         email,
                         sexo,
                         fecha_nacimiento,
@@ -191,7 +188,7 @@ fn main() -> anyhow::Result<()> {
                         .replace("{{experiencia}}", &experiencia);
                     let clean_template = ammonia::clean(&template);
 
-                    statement.execute((id, email, edad, sexo, clean_template))?;
+                    statement.execute((email, edad, sexo, clean_template))?;
 
                     inserted += 1;
                 }
@@ -247,6 +244,11 @@ fn main() -> anyhow::Result<()> {
             // }
 
             // let data: Vec<TneaData> = parse_and_embed("./csv/", &template)?;
+
+            tracing::info!(
+                "Sincronización finalizada, tomó {}s",
+                start.elapsed().as_secs()
+            );
         }
     }
 

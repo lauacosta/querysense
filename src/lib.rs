@@ -12,8 +12,6 @@ pub mod templates;
 
 #[derive(Deserialize, Debug, Serialize, Clone, Default)]
 pub struct TneaData {
-    #[serde(deserialize_with = "deserialize_number_from_string")]
-    pub id: usize,
     pub email: String,
     pub nombre: String,
     #[serde(deserialize_with = "default_if_empty")]
