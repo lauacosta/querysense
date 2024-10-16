@@ -189,8 +189,9 @@ fn main() -> anyhow::Result<()> {
                         .replace("{{estudios}}", &estudios)
                         .replace("{{estudios_mas_recientes}}", &estudios_mas_recientes)
                         .replace("{{experiencia}}", &experiencia);
+                    let clean_template = ammonia::clean(&template);
 
-                    statement.execute((id, email, edad, sexo, template))?;
+                    statement.execute((id, email, edad, sexo, clean_template))?;
 
                     inserted += 1;
                 }

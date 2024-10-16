@@ -1,4 +1,5 @@
 use axum::extract::Path as AxumPath;
+use axum::handler::HandlerWithoutStateExt;
 use axum::response::IntoResponse;
 use std::sync::Arc;
 
@@ -129,16 +130,12 @@ impl Application {
 
 pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve<Router, Router> {
     let server = Router::new()
-        .route("/health", get(health_check))
         .route("/", get(index))
+        .route("/health", get(health_check))
         .route("/search", get(search))
         .route("/historial", get(get_from_db))
-        // .nest_service(
-        //     "/",
-        //     ServeDir::new("./dist").not_found_service(ServeFile::new("./fallout.html")),
-        // )
-        // .nest_service("/static", ServeDir::new("./templates/static"))
         .route("/_assets/*path", get(handle_assets))
+        .fallback_service(fallback.into_service())
         .with_state(state)
         .layer(
             ServiceBuilder::new()
@@ -179,4 +176,11 @@ async fn handle_assets(AxumPath(path): AxumPath<String>) -> impl IntoResponse {
     } else {
         (StatusCode::NOT_FOUND, headers, "")
     }
+}
+
+async fn fallback() -> impl IntoResponse {
+    (
+        StatusCode::NOT_FOUND,
+        "404 Not Found. Por favor, revisa la URL.",
+    )
 }
