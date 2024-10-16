@@ -1,9 +1,9 @@
+use camino::Utf8Path;
 use config::Config;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Deserialize;
 use serde_aux::prelude::deserialize_number_from_string;
 use std::{
-    path::Path,
     sync::{mpsc::channel, RwLock},
     time::Duration,
 };
@@ -102,7 +102,10 @@ pub fn from_configuration() -> Result<Settings, config::ConfigError> {
         .expect("Falla al crear un nuevo `Watcher`");
 
         watcher
-            .watch(Path::new("configuration"), RecursiveMode::Recursive)
+            .watch(
+                Utf8Path::new("configuration").as_std_path(),
+                RecursiveMode::Recursive,
+            )
             .expect("Falla al observar el path `/configuration/`");
 
         // loop {

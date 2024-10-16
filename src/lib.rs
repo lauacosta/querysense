@@ -66,21 +66,41 @@ impl FromStr for Template {
         let separator = "{{";
         let separator_len = separator.len();
         let mut fields = Vec::new();
+        let mut sql_template = String::new();
 
         while let Some(open_idx) = s[start..].find("{{") {
             if let Some(close_idx) = s[start + open_idx..].find("}}") {
                 let field = &s[start + open_idx + separator_len..start + open_idx + close_idx];
-
                 fields.push(field.trim().to_string());
+
+                let label = &s[start..start + open_idx].trim();
+
+                if !sql_template.is_empty() {
+                    sql_template.push(' ');
+                }
+                sql_template.push_str(&format!("' {} ' || {} ||", label, field.trim()));
 
                 start += open_idx + close_idx + separator_len;
             } else {
                 return Err(anyhow::anyhow!("El template esta mal conformado"));
             }
         }
+        if sql_template.ends_with("||") {
+            sql_template.truncate(sql_template.len() - 3);
+        }
+
+        if start < s.len() {
+            let remaining_text = &s[start..].trim();
+            if !remaining_text.is_empty() {
+                if !sql_template.is_empty() {
+                    sql_template.push(' ');
+                }
+                sql_template.push_str(remaining_text);
+            }
+        }
 
         Ok(Self {
-            template: s.to_string(),
+            template: sql_template,
             fields,
         })
     }
@@ -203,7 +223,7 @@ where
         for field in &template.fields {
             if !headers.contains(field) {
                 return Err(anyhow::anyhow!(
-                    "El archivo /{}/{} no tiene el header {}.",
+                    "El archivo {}{} no tiene el header {}.",
                     path,
                     source,
                     field

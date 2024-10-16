@@ -1,14 +1,10 @@
 [package]
-name = "tnea_gestion"
+name = "querysense"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
 path = "src/lib.rs" 
-
-[[bin]]
-path = "src/main.rs"
-name = "tnea_gestion"
 
 [dependencies]
 anyhow = "1.0.86"
@@ -38,3 +34,4 @@ rusqlite = { version = "0.32.0", features = ["bundled"] }
 zerocopy = "0.8.5"
 clap = { version = "4.5.20", features = ["derive"] }
 ammonia = "4.0.0"
+camino = "1.1.9"

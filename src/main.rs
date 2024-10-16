@@ -1,11 +1,9 @@
-use std::str::FromStr;
-
 use clap::{Parser, Subcommand};
-use tnea_gestion::{
+use querysense::{
     configuration::from_configuration, init_sqlite, parse_and_embed, print_title, setup_sqlite,
     startup::Application, Template, TneaData,
 };
-use tokio::runtime::Runtime;
+use std::str::FromStr;
 use tracing::Level;
 
 #[derive(Parser)]
@@ -52,8 +50,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Serve => {
             print_title();
 
-            dbg!("{:?}", &configuration);
-            let rt = Runtime::new()?;
+            tracing::debug!("{:?}", &configuration);
+            let rt = tokio::runtime::Runtime::new()?;
             match rt.block_on(run_server(configuration)) {
                 Ok(_) => (),
                 Err(err) => return Err(err),
@@ -62,6 +60,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Sync { hard } => {
             let db = init_sqlite()?;
             let template = Template::from_str(&configuration.application.template)?;
+
+            println!("{:?}", template);
 
             if hard {
                 let exists: String = db.query_row(
@@ -130,6 +130,19 @@ fn main() -> anyhow::Result<()> {
                         experiencia,
                     } = d;
 
+                    let clean_html = |str: &str| -> String {
+                        if ammonia::is_html(str) {
+                            ammonia::clean(str)
+                        } else {
+                            str.to_string()
+                        }
+                    };
+
+                    let descripcion = clean_html(descripcion);
+                    let estudios = clean_html(estudios);
+                    let estudios_mas_recientes = clean_html(estudios_mas_recientes);
+                    let experiencia = clean_html(experiencia);
+
                     statement.execute((
                         email,
                         nombre,
@@ -149,49 +162,19 @@ fn main() -> anyhow::Result<()> {
                 tracing::info!("Se insertaron {inserted} columnas en tnea_raw!");
             }
 
-            let mut inserted: usize = 0;
             {
-                let mut statement = db.prepare(
+                let sql_statement = template.template;
+                let mut statement = db.prepare(&format!(
                     "
-                    insert into tnea (
-                        email,
-                        edad,
-                        sexo,
-                        template
-                    ) VALUES (?, ?, ?, ?)",
-                )?;
+                    insert into tnea (email, edad, sexo, template)
+                    select email, edad, sexo, {sql_statement} as template
+                    from tnea_raw;
+                    "
+                ))?;
 
-                for d in data {
-                    let TneaData {
-                        email,
-                        sexo,
-                        fecha_nacimiento,
-                        edad,
-                        provincia,
-                        ciudad,
-                        descripcion,
-                        estudios,
-                        estudios_mas_recientes,
-                        experiencia,
-                        ..
-                    } = d;
-
-                    let template = template
-                        .template
-                        .replace("{{fecha_nacimiento}}", &fecha_nacimiento)
-                        .replace("{{edad}}", &edad.to_string())
-                        .replace("{{provincia}}", &provincia)
-                        .replace("{{ciudad}}", &ciudad)
-                        .replace("{{descripcion}}", &descripcion)
-                        .replace("{{estudios}}", &estudios)
-                        .replace("{{estudios_mas_recientes}}", &estudios_mas_recientes)
-                        .replace("{{experiencia}}", &experiencia);
-                    let clean_template = ammonia::clean(&template);
-
-                    statement.execute((email, edad, sexo, clean_template))?;
-
-                    inserted += 1;
-                }
+                let inserted = statement.execute(rusqlite::params![])
+                .map_err(|err| anyhow::anyhow!(err))
+                .expect("Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite");
 
                 tracing::info!("Se insertaron {inserted} columnas en tnea!");
             }
@@ -255,7 +238,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_server(configuration: tnea_gestion::configuration::Settings) -> anyhow::Result<()> {
+async fn run_server(configuration: querysense::configuration::Settings) -> anyhow::Result<()> {
     tracing::info!("Iniciando el servidor...");
     match Application::build(configuration).await {
         Ok(app) => {

@@ -12,21 +12,21 @@
     -moz-osx-font-smoothing: grayscale;
 }
 
-
-a {
-    font-weight: 500;
-    color: #646cff;
-    text-decoration: inherit;
-}
-
-a:hover {
-    color: #535bf2;
+#app {
+    width: 100%;
+    height: 100%;
+    margin: 1rem 1rem auto;
+    padding: 1rem;
+    font-size: 2.5rem;
+    text-align: center;
+    margin-bottom: 1rem;
+    font-family: "Source Code Pro", monospace;
 }
 
 body {
     margin: 0;
-    display: flex;
-    place-items: center;
+    /* display: flex; */
+    /* place-items: center; */
     min-width: 320px;
     min-height: 100vh;
 }
@@ -36,14 +36,10 @@ label {
     margin-bottom: 8px;
 }
 
-.grid {
-    display: flex;
-    gap: 1ch;
-}
-
 h1 {
-    font-size: 3.2em;
-    line-height: 1;
+    font-size: 2.5rem;
+    text-align: center;
+    margin-bottom: 1rem;
     font-family: "Source Code Pro", monospace;
 }
 
@@ -89,53 +85,22 @@ button:focus-visible {
     outline: 4px auto -webkit-focus-ring-color;
 }
 
-#app {
-    width: 100%;
-    height: 100%;
-    margin: 1rem 1rem auto;
-    padding: 1rem;
-}
-
-a,
-.green {
-    text-decoration: none;
-    color: hsla(160, 100%, 37%, 1);
-    transition: 0.4s;
-    padding: 3px;
-}
-
-@media (hover: hover) {
-    a:hover {
-        background-color: hsla(160, 100%, 37%, 0.2);
-    }
-}
-
-@media (min-width: 1024px) {
-    body {
-        display: flex;
-        place-items: center;
-    }
-
-    #app {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        padding: 0 2rem;
-    }
-}
 
 #section {
     display: flex;
+    flex-direction: column;
     height: 100vh;
+    padding: 1rem;
 }
 
 #container {
-    flex: 1;
-    padding: 20px;
-    overflow: hidden;
+    flex-grow: 1;
+    padding: 1rem;
+    overflow: auto;
 }
 
 #scrollHandler {
-    width: 70%;
+    width: 100%;
     height: 60rem;
     overflow-y: auto;
     border: 1px solid #ccc;
@@ -154,10 +119,12 @@ a,
 #Tabla td {
     border: 3px solid rgb(36 36 36);
     padding: 0.5rem;
+    word-wrap: break-word;
 }
 
 #Tabla td {
     text-align: justified;
+    table-layout: fixed;
 }
 
 #Tabla td {
