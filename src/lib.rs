@@ -101,7 +101,7 @@ pub fn init_sqlite() -> anyhow::Result<rusqlite::Connection> {
     Ok(rusqlite::Connection::open(path)?)
 }
 
-pub fn setup_sqlite(db: &rusqlite::Connection, template: &Template) -> anyhow::Result<()> {
+pub fn setup_sqlite(db: &rusqlite::Connection) -> anyhow::Result<()> {
     let (sqlite_version, vec_version): (String, String) =
         db.query_row("select sqlite_version(), vec_version()", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
@@ -109,7 +109,6 @@ pub fn setup_sqlite(db: &rusqlite::Connection, template: &Template) -> anyhow::R
 
     tracing::debug!("sqlite_version={sqlite_version}, vec_version={vec_version}");
 
-    let fields_str = template.fields.join(",");
     db.execute_batch(
         format!(
             "
@@ -122,7 +121,7 @@ pub fn setup_sqlite(db: &rusqlite::Connection, template: &Template) -> anyhow::R
 
         create index if not exists idx_query_timestamp on historial(query, timestamp);
 
-        create table if not exists tnea(
+        create table if not exists tnea_raw(
             id integer primary key,
             email text,
             nombre text,
@@ -137,8 +136,16 @@ pub fn setup_sqlite(db: &rusqlite::Connection, template: &Template) -> anyhow::R
             estudios_mas_recientes text
         );
 
+        create table if not exists tnea(
+            id integer primary key,
+            email text,
+            edad integer not null,
+            sexo text,
+            template text
+        );
+
         create virtual table if not exists fts_tnea using fts5(
-            {fields_str},
+            email, edad, sexo, template,
             content='tnea', content_rowid='id'
         );
 

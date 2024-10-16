@@ -6,7 +6,7 @@ mod search;
 pub use health_check::*;
 pub use historial::*;
 pub use index::*;
-// pub use query::*;
+pub use search::*;
 
 use serde::{Deserialize, Serialize};
 

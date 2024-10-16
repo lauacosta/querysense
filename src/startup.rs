@@ -13,10 +13,10 @@ use tracing::{error_span, Level};
 
 use crate::configuration::FeatureState;
 use crate::init_sqlite;
-use crate::routes::index;
+use crate::routes::search;
 use crate::{
     configuration::Settings,
-    routes::{get_from_db, health_check},
+    routes::{get_from_db, health_check, index},
 };
 
 #[derive(Debug, Clone)]
@@ -131,7 +131,7 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
     let server = Router::new()
         .route("/health", get(health_check))
         .route("/", get(index))
-        // .route("/search", get(search))
+        .route("/search", get(search))
         .route("/historial", get(get_from_db))
         // .nest_service(
         //     "/",

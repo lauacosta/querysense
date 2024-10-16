@@ -13,13 +13,8 @@ pub async fn index(State(AppState { db, .. }): State<AppState>) -> Index {
             email,
             sexo,
             edad,
-            provincia,
-            ciudad,
-            descripcion,
-            estudios,
-            experiencia,
-            estudios_mas_recientes
-        from tnea limit 100;
+            template
+        from tnea;
     ",
     ) {
         Ok(stmt) => stmt,
@@ -33,26 +28,9 @@ pub async fn index(State(AppState { db, .. }): State<AppState>) -> Index {
         let email = row.get(0).unwrap_or_default();
         let sexo = row.get(1).unwrap_or_default();
         let edad = row.get(2).unwrap_or_default();
-        let provincia = row.get(3).unwrap_or_default();
-        let ciudad = row.get(4).unwrap_or_default();
-        let descripcion = row.get(5).unwrap_or_default();
-        let estudios = row.get(6).unwrap_or_default();
-        let experiencia = row.get(7).unwrap_or_default();
-        let estudios_mas_recientes = row.get(8).unwrap_or_default();
+        let template = row.get(3).unwrap_or_default();
 
-        let data = TneaDisplay::new(
-            email,
-            sexo,
-            edad,
-            provincia,
-            ciudad,
-            descripcion,
-            estudios,
-            experiencia,
-            estudios_mas_recientes,
-        );
-
-        dbg!("{:?}", &data);
+        let data = TneaDisplay::new(email, sexo, edad, template, -1.0);
 
         Ok(data)
     }) {

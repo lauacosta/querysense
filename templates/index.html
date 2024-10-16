@@ -8,29 +8,21 @@
         <table id="Tabla">
             <thead>
                 <tr>
+                    <th scope="col">Rank</th>
                     <th scope="col">Correo</th>
                     <th scope="col">Edad</th>
                     <th scope="col">Sexo</th>
-                    <th scope="col">Ciudad</th>
-                    <th scope="col">Provincia</th>
-                    <th scope="col">Estudios</th>
-                    <th scope="col">Experiencia</th>
-                    <th scope="col">Descripcion</th>
-                    <th scope="col">Est Recientes</th>
+                    <th scope="col">Template</th>
                 </tr>
             </thead>
             <tbody>
                 {% for row in table %}
                 <tr>
+                    <td> {{ row.rank }} </td>
                     <td> {{ row.email }} </td>
                     <td> {{ row.edad }} </td>
                     <td> {{ row.sexo }} </td>
-                    <td> {{ row.ciudad }} </td>
-                    <td> {{ row.provincia }} </td>
-                    <td> {{ row.estudios }} </td>
-                    <td> {{ row.experiencia }} </td>
-                    <td> {{ row.descripcion }} </td>
-                    <td> {{ row.estudios_mas_recientes }} </td>
+                    <td> {{ row.template|safe }} </td>
                 </tr>
                 {% endfor %} 
             </tbody>

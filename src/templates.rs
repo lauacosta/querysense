@@ -19,38 +19,20 @@ impl Default for Index {
 #[derive(Debug, Clone, Default)]
 pub struct TneaDisplay {
     email: String,
-    sexo: String,
     edad: usize,
-    provincia: String,
-    ciudad: String,
-    descripcion: String,
-    estudios: String,
-    experiencia: String,
-    estudios_mas_recientes: String,
+    sexo: String,
+    template: String,
+    pub rank: f32,
 }
 
 impl TneaDisplay {
-    pub fn new(
-        email: String,
-        sexo: String,
-        edad: usize,
-        provincia: String,
-        ciudad: String,
-        descripcion: String,
-        experiencia: String,
-        estudios: String,
-        estudios_mas_recientes: String,
-    ) -> Self {
+    pub fn new(email: String, edad: usize, sexo: String, template: String, rank: f32) -> Self {
         Self {
             email,
-            sexo,
+            template,
             edad,
-            provincia,
-            ciudad,
-            descripcion,
-            estudios,
-            experiencia,
-            estudios_mas_recientes,
+            sexo,
+            rank,
         }
     }
 }

@@ -31,13 +31,14 @@ fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     let level = match cli.debug.unwrap().to_lowercase().trim() {
-        "trace" => Level::TRACE, 
-        "debug" => Level::DEBUG, 
-        "info" => Level::INFO, 
+        "trace" | "t" => Level::TRACE,
+        "debug" | "d" => Level::DEBUG,
+        "info" | "i" => Level::INFO,
         _ => {
-            return Err(anyhow::anyhow!(
+            eprintln!(
                 "Log Level desconocido, utiliza `INFO`, `DEBUG` o `TRACE`. Usando `INFO` como predeterminado."
-            ))
+            );
+            Level::INFO
         }
     };
     tracing_subscriber::fmt()
@@ -59,38 +60,37 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Sync { hard } => {
-            dbg!("{:?}", &configuration);
-
             let db = init_sqlite()?;
             let template = Template::from_str(&configuration.application.template)?;
 
             if hard {
                 let exists: String = db.query_row(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    "select name from sqlite_master where type='table' and name=?",
                     ["tnea"],
                     |row| row.get(0),
                 )?;
 
                 if !exists.is_empty() {
-                    db.execute("DROP TABLE TNEA", [])?;
+                    db.execute("drop table tnea", [])?;
+                    db.execute("drop table tnea_raw", [])?;
                 }
             }
 
-            setup_sqlite(&db, &template)?;
-            let fields_str = template.fields.join(",");
+            setup_sqlite(&db)?;
 
             let num: usize = db.query_row("select count(*) from tnea", [], |row| row.get(0))?;
-            dbg!("{}", num);
 
             // TODO: Añadir la condicion de que caduquen los datos.
             if num != 0 {
-                tracing::info!("La tabla ya tiene contenido.");
+                tracing::info!("La tabla `tnea` existe y tiene {num} registros.");
                 return Ok(());
             }
 
             let data: Vec<TneaData> = parse_and_embed("./csv/", &template)?;
 
-            tracing::info!("Abriendo transacción para insertar datos en la tabla tnea!");
+            tracing::info!(
+                "Abriendo transacción para insertar datos en la tabla `tnea_raw` y `tnea`!"
+            );
 
             db.execute("BEGIN TRANSACTION", []).expect("Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite");
 
@@ -98,7 +98,7 @@ fn main() -> anyhow::Result<()> {
             {
                 let mut statement = db.prepare(
                     "
-                    insert into tnea (
+                    insert into tnea_raw (
                         id,
                         email,
                         nombre,
@@ -114,7 +114,7 @@ fn main() -> anyhow::Result<()> {
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 )?;
 
-                for d in data {
+                for d in &data {
                     let TneaData {
                         id,
                         email,
@@ -144,10 +144,59 @@ fn main() -> anyhow::Result<()> {
                         estudios_mas_recientes,
                         experiencia,
                     ))?;
+
                     inserted += 1;
                 }
+                tracing::info!("Se insertaron {inserted} columnas en tnea_raw!");
             }
-            tracing::info!("Se insertaron {inserted} columnas!");
+
+            let mut inserted: usize = 0;
+            {
+                let mut statement = db.prepare(
+                    "
+                    insert into tnea (
+                        id,
+                        email,
+                        edad,
+                        sexo,
+                        template
+                    ) VALUES (?, ?, ?, ?, ?)",
+                )?;
+
+                for d in data {
+                    let TneaData {
+                        id,
+                        email,
+                        sexo,
+                        fecha_nacimiento,
+                        edad,
+                        provincia,
+                        ciudad,
+                        descripcion,
+                        estudios,
+                        estudios_mas_recientes,
+                        experiencia,
+                        ..
+                    } = d;
+
+                    let template = template
+                        .template
+                        .replace("{{fecha_nacimiento}}", &fecha_nacimiento)
+                        .replace("{{edad}}", &edad.to_string())
+                        .replace("{{provincia}}", &provincia)
+                        .replace("{{ciudad}}", &ciudad)
+                        .replace("{{descripcion}}", &descripcion)
+                        .replace("{{estudios}}", &estudios)
+                        .replace("{{estudios_mas_recientes}}", &estudios_mas_recientes)
+                        .replace("{{experiencia}}", &experiencia);
+
+                    statement.execute((id, email, edad, sexo, template))?;
+
+                    inserted += 1;
+                }
+
+                tracing::info!("Se insertaron {inserted} columnas en tnea!");
+            }
 
             db.execute("COMMIT", []).expect(
         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
@@ -158,8 +207,8 @@ fn main() -> anyhow::Result<()> {
             db.execute_batch(
                 format!(
                     "
-                    insert into fts_tnea(rowid, {fields_str})
-                    select rowid, {fields_str}
+                    insert into fts_tnea(rowid, email, edad, sexo, template)
+                    select rowid, email, edad, sexo, template
                     from tnea;
 
                     insert into fts_tnea(fts_tnea) values('optimize');
