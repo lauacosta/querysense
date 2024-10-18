@@ -1,0 +1,38 @@
+{%- import "./componentes.html" as scope -%}
+{% extends "base.html" %}
+
+{% block content %}
+    <div>
+    {% call scope::busqueda("Busqueda:", "search") %}
+    </div>
+    <div class="table-header">
+        <div class="result-count">{{ msg }}</div>
+        <div class="pagination"></div> 
+    </div>
+
+    <div class="table-container">
+        <table class="content">
+            <thead>
+                <tr>
+                    <th scope="col">Rank</th>
+                    <th scope="col">Correo</th>
+                    <th scope="col">Edad</th>
+                    <th scope="col">Sexo</th>
+                    <th scope="col">Template</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in table %}
+                <tr>
+                    <td> {{ row.rank }} </td>
+                    <td> {{ row.email }} </td>
+                    <td> {{ row.edad }} </td>
+                    <td> {{ row.sexo }} </td>
+                    <td> {{ row.template|safe }} </td>
+                </tr>
+                {% endfor %} 
+            </tbody>
+        </table>
+    </div>
+{% endblock content %}
+

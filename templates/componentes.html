@@ -1,0 +1,8 @@
+{% macro busqueda(label, url) %}
+    <h1>Realiza tu búsqueda</h1>
+    <form action="/{{ url }}" method="GET">
+    <label for="query">{{ label }}</label>
+        <input type="text" id="query" name="query" required>
+        <button type="submit">Enviar</button>
+    </form>
+{% endmacro %}
