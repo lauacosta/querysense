@@ -2,12 +2,16 @@ use askama_axum::Template;
 
 #[derive(Template)]
 #[template(path = "index.html")]
-pub struct Index {
+pub struct Index;
+
+#[derive(Template)]
+#[template(path = "table.html")]
+pub struct Table {
     pub msg: String,
     pub table: Vec<TneaDisplay>,
 }
 
-impl Default for Index {
+impl Default for Table {
     fn default() -> Self {
         Self {
             msg: "".to_string(),

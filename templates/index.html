@@ -1,32 +1,7 @@
+{%- import "./componentes.html" as scope -%}
 {% extends "base.html" %}
 
 {% block content %}
-    <div>
-        <p>Cantidad de resultados: {{ table.len() }}</p>
-    </div>
-    <div id="scrollHandler">
-        <table id="Tabla">
-            <thead>
-                <tr>
-                    <th scope="col">Rank</th>
-                    <th scope="col">Correo</th>
-                    <th scope="col">Edad</th>
-                    <th scope="col">Sexo</th>
-                    <th scope="col">Template</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in table %}
-                <tr>
-                    <td> {{ row.rank }} </td>
-                    <td> {{ row.email }} </td>
-                    <td> {{ row.edad }} </td>
-                    <td> {{ row.sexo }} </td>
-                    <td> {{ row.template|safe }} </td>
-                </tr>
-                {% endfor %} 
-            </tbody>
-        </table>
-    </div>
+    {% call scope::busqueda("Busqueda:", "search") %}
 {% endblock content %}
 

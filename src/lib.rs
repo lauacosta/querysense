@@ -128,8 +128,7 @@ pub fn setup_sqlite(db: &rusqlite::Connection) -> anyhow::Result<()> {
     tracing::debug!("sqlite_version={sqlite_version}, vec_version={vec_version}");
 
     db.execute_batch(
-        format!(
-            "
+        "
         create table if not exists historial (
             id integer primary key,
             query text not null unique,
@@ -168,14 +167,7 @@ pub fn setup_sqlite(db: &rusqlite::Connection) -> anyhow::Result<()> {
         );
 
 
-        " // .load ./vec0
-
-                      // create virtual table if not exists vec_tnea using vec0(
-                      //     user_id integer primary key,
-                      //     template_embedding float[1024]
-                      // );
-        )
-        .as_str(),
+        ",
     )
     .map_err(|err| anyhow::anyhow!(err))
     .expect("Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite");

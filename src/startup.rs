@@ -166,13 +166,20 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
     axum::serve(listener, server)
 }
 
-static MAIN_CSS: &str = include_str!("../assets/index.css");
+static INDEX_CSS: &str = include_str!("../assets/index.css");
+static INDEX_JS: &str = include_str!("../assets/index.js");
 async fn handle_assets(AxumPath(path): AxumPath<String>) -> impl IntoResponse {
     let mut headers = HeaderMap::new();
 
     if path == "index.css" {
         headers.insert(header::CONTENT_TYPE, "text/css".parse().unwrap());
-        (StatusCode::OK, headers, MAIN_CSS)
+        (StatusCode::OK, headers, INDEX_CSS)
+    } else if path == "index.js" {
+        headers.insert(
+            header::CONTENT_TYPE,
+            "application/javascript".parse().unwrap(),
+        );
+        (StatusCode::OK, headers, INDEX_JS)
     } else {
         (StatusCode::NOT_FOUND, headers, "")
     }

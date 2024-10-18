@@ -61,8 +61,6 @@ fn main() -> anyhow::Result<()> {
             let db = init_sqlite()?;
             let template = Template::from_str(&configuration.application.template)?;
 
-            println!("{:?}", template);
-
             if hard {
                 let exists: String = db.query_row(
                     "select name from sqlite_master where type='table' and name=?",
@@ -186,7 +184,6 @@ fn main() -> anyhow::Result<()> {
             tracing::info!("Insertando nuevas columnas en fts_tnea...");
 
             db.execute_batch(
-                format!(
                     "
                     insert into fts_tnea(rowid, email, edad, sexo, template)
                     select rowid, email, edad, sexo, template
@@ -194,8 +191,6 @@ fn main() -> anyhow::Result<()> {
 
                     insert into fts_tnea(fts_tnea) values('optimize');
                 "
-                )
-                .as_str(),
             )
             .map_err(|err| anyhow::anyhow!(err))
             .expect("Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite");
@@ -254,7 +249,7 @@ async fn run_server(configuration: querysense::configuration::Settings) -> anyho
         }
         Err(e) => {
             tracing::error!("Fallo al iniciar el servidor: {:?}", e);
-            return Err(e.into());
+            return Err(e);
         }
     }
     Ok(())

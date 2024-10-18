@@ -4,7 +4,7 @@ use serde::Deserialize;
 use crate::{
     configuration::FeatureState,
     startup::AppState,
-    templates::{Index, TneaDisplay},
+    templates::{Table, TneaDisplay},
 };
 
 #[derive(Deserialize, Debug)]
@@ -14,35 +14,12 @@ pub struct Params {
 }
 
 #[axum::debug_handler]
-pub async fn search(Query(params): Query<Params>, State(app): State<AppState>) -> Index {
+pub async fn search(Query(params): Query<Params>, State(app): State<AppState>) -> Table {
     // Intento encontrar el resultado en el caché si no es más antiguo que un mes.
     // TODO: Escribir el código para el caso en donde tenga que actualizar un registro.
     match app.cache {
         FeatureState::Enabled => {
             todo!();
-            // let db = app.db.lock().await;
-
-            // if let Ok(record) = db.query_row(
-            //     "select result from historial where query=:query and timestamp > datetime('now', '-1 month');",
-            //     &[(":query", params.query.as_str())], |row|  row.get::<_, String>(0)
-            // ) {
-            //     let json: Vec<TneaData> = serde_json::from_str(&record).unwrap();
-            //     tracing::info!(
-            //         "Se han extraido el query: `{}` del caché exitosamente!",
-            //         params.query
-            //     );
-            //     return Json(json);
-
-            // }
-
-            // // if let Ok(record) = sqlx::query!(
-            // // "select result from historial where query=$1 and timestamp > datetime('now', '-1 month');",
-            // // params.query
-            // // )
-            // // .fetch_one(&app.db)
-            // // .await
-            // // {
-            // //               }
         }
         FeatureState::Disabled => tracing::debug!("El caché se encuentra desactivado!"),
     };
@@ -56,14 +33,14 @@ pub async fn search(Query(params): Query<Params>, State(app): State<AppState>) -
             highlight(fts_tnea, 3, '<b style=\"color: green;\">', '</b>') as template
         from fts_tnea
         where template match :query
-        order by rank
+        order by rank 
         ",
     ) {
         //     where rank > ?;
         Ok(stmt) => stmt,
         Err(err) => {
             tracing::warn!("{}", err);
-            return Index::default();
+            return Table::default();
         }
     };
 
@@ -81,7 +58,7 @@ pub async fn search(Query(params): Query<Params>, State(app): State<AppState>) -
         Ok(r) => r,
         Err(err) => {
             tracing::warn!("{}", err);
-            return Index::default();
+            return Table::default();
         }
     };
 
@@ -91,7 +68,7 @@ pub async fn search(Query(params): Query<Params>, State(app): State<AppState>) -
             Ok(r) => table.push(r),
             Err(err) => {
                 tracing::warn!("{}", err);
-                return Index::default();
+                return Table::default();
             }
         };
     }
@@ -128,7 +105,7 @@ pub async fn search(Query(params): Query<Params>, State(app): State<AppState>) -
         FeatureState::Disabled => tracing::debug!("El caché se encuentra desactivado!"),
     };
 
-    Index {
+    Table {
         msg: format!("Hay un total de {} resultados.", table.len()),
         table,
     }
