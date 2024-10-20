@@ -35,3 +35,5 @@ zerocopy = "0.8.5"
 clap = { version = "4.5.20", features = ["derive"] }
 ammonia = "4.0.0"
 camino = "1.1.9"
+futures = "0.3.31"
+indicatif = "0.17.8"

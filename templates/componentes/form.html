@@ -1,0 +1,17 @@
+{% macro busqueda(url) %}
+<form action="/{{ url }}" method="GET">
+    <section class="form-content">
+        <div class="form-input">
+            <label for="query">Busqueda: <span style="color: red;">*</span> </label>
+            <input type="text" id="query" name="query" required>
+            <label for="sexo">Sexo: </label>
+            <select id="sexo" name="sexo">
+                <option value="todo" selected>Todo</option>
+                <option value="masculino">Masculino</option>
+                <option value="femenino">Femenino</option>
+            </select>
+        </div>
+    </section>
+<button type="submit">Buscar</button>
+</form>
+{% endmacro %}

@@ -2,10 +2,10 @@ document.addEventListener("DOMContentLoaded", function () {
 	const content = document.querySelector(".content");
 	const itemsPerPage = 10;
 	let currentPage = 0;
-	const items = Array.from(content.getElementsByTagName("tr")).slice(1); // Skip table header
+	const items = Array.from(content.getElementsByTagName("tr")).slice(1);
 	const totalPages = Math.ceil(items.length / itemsPerPage);
 
-	function showPage(page) {
+	function show_page(page) {
 		const startIndex = page * itemsPerPage;
 		const endIndex = startIndex + itemsPerPage;
 
@@ -14,10 +14,10 @@ document.addEventListener("DOMContentLoaded", function () {
 				index >= startIndex && index < endIndex ? "" : "none";
 		});
 
-		updatePaginationInfo();
+		update_pagination_info();
 	}
 
-	function createPaginationControls() {
+	function create_pagination_controls() {
 		const paginationContainer = document.querySelector(".pagination");
 
 		const prevButton = document.createElement("button");
@@ -25,7 +25,7 @@ document.addEventListener("DOMContentLoaded", function () {
 		prevButton.addEventListener("click", () => {
 			if (currentPage > 0) {
 				currentPage--;
-				showPage(currentPage);
+				show_page(currentPage);
 			}
 		});
 		paginationContainer.appendChild(prevButton);
@@ -39,19 +39,46 @@ document.addEventListener("DOMContentLoaded", function () {
 		nextButton.addEventListener("click", () => {
 			if (currentPage < totalPages - 1) {
 				currentPage++;
-				showPage(currentPage);
+				show_page(currentPage);
 			}
 		});
 		paginationContainer.appendChild(nextButton);
 
-		updatePaginationInfo();
+		update_pagination_info();
 	}
 
-	function updatePaginationInfo() {
+	function update_pagination_info() {
 		const pageInfo = document.querySelector(".page-info");
 		pageInfo.textContent = `Page ${currentPage + 1} of ${totalPages}`;
 	}
 
-	createPaginationControls();
-	showPage(currentPage);
+	create_pagination_controls();
+	show_page(currentPage);
 });
+
+function table_to_csv() {
+	const table = document.getElementById("table-content");
+	const rows = table.querySelectorAll("tr");
+	let csvContent = "";
+
+	rows.forEach((row) => {
+		const cells = row.querySelectorAll("th, td");
+		const rowData = [];
+		cells.forEach((cell) => rowData.push(cell.textContent));
+		csvContent += rowData.join(",") + "\n";
+	});
+
+	return csvContent;
+}
+
+function download_csv() {
+	const csvContent = table_to_csv();
+	const blob = new Blob([csvContent], { type: "text/csv" });
+	const url = URL.createObjectURL(blob);
+	const a = document.createElement("a");
+	a.setAttribute("href", url);
+	a.setAttribute("download", "datos_busqueda.csv");
+	a.click();
+}
+
+document.getElementById("csv_trigger").addEventListener("click", download_csv);

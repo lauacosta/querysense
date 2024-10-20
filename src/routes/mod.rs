@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct Historial {
-    pub id: i64,
+    pub id: usize,
     pub query: String,
     pub result: String,
     pub timestamp: Option<chrono::NaiveDateTime>,
@@ -20,7 +20,7 @@ pub struct Historial {
 
 impl Historial {
     pub fn new(
-        id: i64,
+        id: usize,
         query: String,
         result: String,
         timestamp: Option<chrono::NaiveDateTime>,

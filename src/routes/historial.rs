@@ -26,9 +26,9 @@ Ok(stmt) => stmt,
                 Err(err) => return err_handler(err.to_string()),
             };
             let rows = match statement.query_map([], |row| {
-                let id = row.get(0)?;
-                let query = row.get(1)?;
-                let result = row.get(2)?;
+                let id: usize = row.get(0)?;
+                let query: String = row.get(1)?;
+                let result: String = row.get(2)?;
                 let timestamp =
                     row.get::<_, String>(3)?
                         .parse::<NaiveDateTime>()

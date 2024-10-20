@@ -9,6 +9,7 @@ pub mod configuration;
 pub mod routes;
 pub mod startup;
 pub mod templates;
+pub mod vector;
 
 #[derive(Deserialize, Debug, Serialize, Clone, Default)]
 pub struct TneaData {
@@ -166,7 +167,10 @@ pub fn setup_sqlite(db: &rusqlite::Connection) -> anyhow::Result<()> {
             content='tnea', content_rowid='id'
         );
 
-
+        create virtual table if not exists vec_tnea using vec0(
+            row_id integer primary key,
+            template_embedding float[1536]
+        );
         ",
     )
     .map_err(|err| anyhow::anyhow!(err))

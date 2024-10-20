@@ -14,7 +14,7 @@ pub struct Table {
 impl Default for Table {
     fn default() -> Self {
         Self {
-            msg: "".to_string(),
+            msg: "No se encontraron ningun registro.".to_string(),
             table: vec![TneaDisplay::default()],
         }
     }

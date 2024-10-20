@@ -1,17 +1,19 @@
-{%- import "./componentes.html" as scope -%}
+{%- import "./componentes/form.html" as scope -%}
 {% extends "base.html" %}
 
 {% block content %}
     <div>
-    {% call scope::busqueda("Busqueda:", "search") %}
+    {% call scope::busqueda("search") %}
     </div>
     <div class="table-header">
         <div class="result-count">{{ msg }}</div>
         <div class="pagination"></div> 
+        <button id="csv_trigger">Descargar CSV</button>
     </div>
 
+
     <div class="table-container">
-        <table class="content">
+        <table class="content" id="table-content">
             <thead>
                 <tr>
                     <th scope="col">Rank</th>

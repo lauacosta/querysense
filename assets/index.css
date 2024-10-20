@@ -17,6 +17,20 @@ table {
     margin-top: 20px;
 }
 
+h1 {
+    font-size: 4rem;
+    text-align: center;
+}
+
+input,
+label {
+    display: block;
+}
+
+label {
+    font-size: 1.5rem;
+}
+
 th,
 td {
     border: 3px solid rgb(36 36 36);
@@ -53,7 +67,8 @@ th {
     text-align: center;
 }
 
-input {
+input,
+select {
     padding: 0.6em 1.2em;
     margin: 0.2rem;
     width: 50rem;
@@ -142,4 +157,17 @@ button:active {
     position: absolute;
     white-space: nowrap;
     width: 1px;
+}
+
+.form-content {
+    margin: 20px;
+    background-color: #ebebeb;
+    border: 2px solid rgb(36 36 36);
+    border-radius: 10px;
+    box-shadow: 5px 5px 15px rgba(0, 0, 0, 0.3),
+        -5px -5px 15px rgba(255, 255, 255, 0.5);
+}
+
+.form-input {
+    margin: 20px;
 }
