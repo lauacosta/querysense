@@ -1,8 +1,12 @@
+mod assets;
+mod fallback;
 mod health_check;
 mod historial;
 mod index;
 mod search;
 
+pub use assets::*;
+pub use fallback::*;
 pub use health_check::*;
 pub use historial::*;
 pub use index::*;

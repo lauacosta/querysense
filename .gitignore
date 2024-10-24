@@ -5,7 +5,7 @@ meilisearch
 data.ms
 *.sqlite3
 .env
-tnea_gestion.db
+querysense.db
 /configuration
 /dist
 /sql

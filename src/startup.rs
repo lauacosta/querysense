@@ -1,10 +1,7 @@
-use axum::extract::Path as AxumPath;
 use axum::handler::HandlerWithoutStateExt;
-use axum::response::IntoResponse;
 use std::sync::Arc;
 
 use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
-use http::{header, HeaderMap, StatusCode};
 use tokio::signal;
 use tokio::sync::Mutex;
 use tower::ServiceBuilder;
@@ -12,13 +9,9 @@ use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, Level};
 
-use crate::configuration::FeatureState;
-use crate::init_sqlite;
-use crate::routes::search;
-use crate::{
-    configuration::Settings,
-    routes::{get_from_db, health_check, index},
-};
+use crate::configuration::{self, FeatureState};
+use crate::sqlite::init_sqlite;
+use crate::{configuration::Settings, routes};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -130,12 +123,12 @@ impl Application {
 
 pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve<Router, Router> {
     let server = Router::new()
-        .route("/", get(index))
-        .route("/health", get(health_check))
-        .route("/search", get(search))
-        .route("/historial", get(get_from_db))
-        .route("/_assets/*path", get(handle_assets))
-        .fallback_service(fallback.into_service())
+        .route("/", get(routes::index))
+        .route("/health", get(routes::health_check))
+        .route("/search", get(routes::search))
+        .route("/historial", get(routes::get_from_db))
+        .route("/_assets/*path", get(routes::handle_assets))
+        .fallback_service(routes::fallback.into_service())
         .with_state(state)
         .layer(
             ServiceBuilder::new()
@@ -166,28 +159,24 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
     axum::serve(listener, server)
 }
 
-static INDEX_CSS: &str = include_str!("../assets/index.css");
-static INDEX_JS: &str = include_str!("../assets/index.js");
-async fn handle_assets(AxumPath(path): AxumPath<String>) -> impl IntoResponse {
-    let mut headers = HeaderMap::new();
-
-    if path == "index.css" {
-        headers.insert(header::CONTENT_TYPE, "text/css".parse().unwrap());
-        (StatusCode::OK, headers, INDEX_CSS)
-    } else if path == "index.js" {
-        headers.insert(
-            header::CONTENT_TYPE,
-            "application/javascript".parse().unwrap(),
-        );
-        (StatusCode::OK, headers, INDEX_JS)
-    } else {
-        (StatusCode::NOT_FOUND, headers, "")
+pub async fn run_server(configuration: configuration::Settings) -> anyhow::Result<()> {
+    tracing::info!("Iniciando el servidor...");
+    match Application::build(configuration).await {
+        Ok(app) => {
+            tracing::info!(
+                "La aplicación está disponible en http://{}:{}.",
+                app.host(),
+                app.port()
+            );
+            if let Err(e) = app.run_until_stopped().await {
+                tracing::error!("Error ejecutando el servidor HTTP: {:?}", e);
+                return Err(e.into());
+            }
+        }
+        Err(e) => {
+            tracing::error!("Fallo al iniciar el servidor: {:?}", e);
+            return Err(e);
+        }
     }
-}
-
-async fn fallback() -> impl IntoResponse {
-    (
-        StatusCode::NOT_FOUND,
-        "404 Not Found. Por favor, revisa la URL.",
-    )
+    Ok(())
 }

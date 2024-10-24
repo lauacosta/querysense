@@ -1,7 +1,7 @@
 use camino::Utf8Path;
 use config::Config;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use serde::Deserialize;
+use serde::{de, Deserialize, Deserializer};
 use serde_aux::prelude::deserialize_number_from_string;
 use std::{
     sync::{mpsc::channel, RwLock},
@@ -58,7 +58,7 @@ pub struct ApplicationSettings {
     pub port: u16,
     pub host: String,
     pub cache: FeatureState,
-    pub template: String,
+    pub template: Template,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -194,5 +194,69 @@ impl TryFrom<String> for Environment {
                 "{other} No es un ambiente soportado, usa 'local' o 'production'",
             )),
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Template {
+    pub template: String,
+    pub fields: Vec<String>,
+}
+
+impl<'de> Deserialize<'de> for Template {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let str: String = String::deserialize(deserializer)?;
+
+        if str.is_empty() {
+            return Err(de::Error::custom(
+                "Un template no puede ser un string vacío",
+            ));
+        }
+
+        let mut start = 0;
+        let separator = "{{";
+        let separator_len = separator.len();
+        let mut fields = Vec::new();
+        let mut sql_template = String::new();
+
+        while let Some(open_idx) = str[start..].find("{{") {
+            if let Some(close_idx) = str[start + open_idx..].find("}}") {
+                let field = &str[start + open_idx + separator_len..start + open_idx + close_idx];
+                fields.push(field.trim().to_string());
+
+                let label = &str[start..start + open_idx].trim();
+
+                if !sql_template.is_empty() {
+                    sql_template.push(' ');
+                }
+                sql_template.push_str(&format!("' {} ' || {} ||", label, field.trim()));
+
+                start += open_idx + close_idx + separator_len;
+            } else {
+                return Err(de::Error::custom("El template está mal conformado"));
+            }
+        }
+
+        if sql_template.ends_with("||") {
+            sql_template.truncate(sql_template.len() - 3);
+        }
+
+        if start < str.len() {
+            let remaining_text = &str[start..].trim();
+            if !remaining_text.is_empty() {
+                if !sql_template.is_empty() {
+                    sql_template.push(' ');
+                }
+                sql_template.push_str(remaining_text);
+            }
+        }
+
+        Ok(Self {
+            template: sql_template,
+            fields,
+        })
     }
 }

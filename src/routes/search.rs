@@ -78,8 +78,8 @@ pub async fn search(Query(params): Query<Params>, State(app): State<AppState>) -
         "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}` (umbral: {})",
         params.query,
         table.len(),
-        table.first().unwrap().rank,
-        table.last().unwrap().rank,
+        table.first().map_or_else(Default::default, |d| d.rank),
+        table.last().map_or_else(Default::default, |d| d.rank),
         -1.0
     );
 
