@@ -37,3 +37,24 @@ impl Historial {
         }
     }
 }
+
+pub enum SearchStrategy {
+    Fts,
+    Semantic,
+    Hybrid,
+}
+
+impl TryFrom<String> for SearchStrategy {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "fts" => Ok(Self::Fts),
+            "semantic_search" => Ok(Self::Semantic),
+            "hybrid_search" => Ok(Self::Hybrid),
+            other => Err(format!(
+                "{other} No es una estrategia de búsqueda soportada, usa 'fts', 'semantic_search' o 'hybrid_search'",
+            )),
+        }
+    }
+}
