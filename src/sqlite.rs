@@ -1,14 +1,17 @@
+use std::iter::zip;
+
 use rusqlite::{ffi::sqlite3_auto_extension, Connection};
 use sqlite_vec::sqlite3_vec_init;
 use zerocopy::IntoBytes;
 
 use crate::{
-    configuration, embeddings,
+    cli::{self, Model},
+    configuration, embeddings, openai,
     utils::{self, TneaData},
 };
 
-pub fn sync_vec_tnea(db: &Connection) -> anyhow::Result<()> {
-    let mut statement = db.prepare("select id, template from tnea limit 100")?;
+pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result<()> {
+    let mut statement = db.prepare("select id, template from tnea")?;
 
     let templates: Vec<(u64, String)> = match statement.query_map([], |row| {
         let id: u64 = row.get(0)?;
@@ -24,27 +27,41 @@ pub fn sync_vec_tnea(db: &Connection) -> anyhow::Result<()> {
     let mut statement =
         db.prepare("insert into vec_tnea(row_id, template_embedding) values (?,?)")?;
     let mut inserted = 0;
-    let chunk_size = templates.len() / 10;
+
+    let chunk_size = 2048;
 
     let templates_chunks: Vec<_> = templates.chunks(chunk_size).map(|v| v.to_vec()).collect();
 
     tracing::info!("Generando embeddings...");
     for chunk in templates_chunks {
-        let results = embeddings::create_embeddings(
-            chunk,
-            embeddings::Args::new(
-                true,
-                Some("t5-small".to_string()),
-                None,
-                None,
-                None,
-                None,
-                embeddings::Model::T5Small,
-            ),
-        )
-        .map_err(|err| {
-            anyhow::anyhow!("Algo ocurrió durante la creación de los embeddings: {err}")
-        })?;
+        let results = match model {
+            cli::Model::Local => embeddings::create_embeddings(
+                chunk,
+                embeddings::Args::new(
+                    true,
+                    Some("t5-small".to_string()),
+                    None,
+                    None,
+                    None,
+                    None,
+                    embeddings::Model::T5Small,
+                ),
+            )
+            .map_err(|err| {
+                anyhow::anyhow!("Algo ocurrió durante la creación de los embeddings: {err}")
+            })?,
+            cli::Model::OpenAI => {
+                let client = reqwest::Client::new();
+                let indices: Vec<u64> = chunk.iter().map(|(id, _)| *id).collect();
+                let templates: Vec<String> =
+                    chunk.into_iter().map(|(_, template)| template).collect();
+
+                let result = openai::embed_vec(templates, &client).await?;
+
+                // https://community.openai.com/t/does-the-index-field-on-an-embedding-response-correlate-to-the-index-of-the-input-text-it-was-generated-from/526099
+                zip(indices, result).collect()
+            }
+        };
 
         let start = std::time::Instant::now();
         tracing::info!("Insertando nuevas columnas en vec_tnea...");
@@ -110,7 +127,7 @@ pub fn init_sqlite() -> anyhow::Result<rusqlite::Connection> {
     })?;
     Ok(rusqlite::Connection::open(path)?)
 }
-pub fn setup_sqlite(db: &rusqlite::Connection) -> anyhow::Result<()> {
+pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> anyhow::Result<()> {
     let (sqlite_version, vec_version): (String, String) =
         db.query_row("select sqlite_version(), vec_version()", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
@@ -118,7 +135,7 @@ pub fn setup_sqlite(db: &rusqlite::Connection) -> anyhow::Result<()> {
 
     tracing::debug!("sqlite_version={sqlite_version}, vec_version={vec_version}");
 
-    db.execute_batch(
+    let statement = format!(
         "
         create table if not exists historial (
             id integer primary key,
@@ -157,14 +174,29 @@ pub fn setup_sqlite(db: &rusqlite::Connection) -> anyhow::Result<()> {
             content='tnea', content_rowid='id'
         );
 
-        create virtual table if not exists vec_tnea using vec0(
+        {}
+        ",
+        match model {
+            Model::OpenAI => {
+                "create virtual table if not exists vec_tnea using vec0(
+            row_id integer primary key,
+            template_embedding float[1536]
+        );"
+            }
+            Model::Local => {
+                "create virtual table if not exists vec_tnea using vec0(
             row_id integer primary key,
             template_embedding float[512]
+        );"
+            }
+        }
+    );
+
+    db.execute_batch(&statement)
+        .map_err(|err| anyhow::anyhow!(err))
+        .expect(
+            "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
         );
-        ",
-    )
-    .map_err(|err| anyhow::anyhow!(err))
-    .expect("Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite");
 
     Ok(())
 }

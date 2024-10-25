@@ -21,6 +21,9 @@ pub enum Commands {
         /// Determina la estrategia para actualizar la base de datos.
         #[arg(value_enum, short, long, default_value_t = SyncStrategy::Fts)]
         sync_strat: SyncStrategy,
+
+        #[arg(value_enum, short, long, default_value_t = Model::Local)]
+        model: Model,
     },
 }
 
@@ -29,4 +32,10 @@ pub enum SyncStrategy {
     Fts,
     Vector,
     All,
+}
+
+#[derive(Clone, ValueEnum)]
+pub enum Model {
+    OpenAI,
+    Local,
 }

@@ -37,6 +37,7 @@ fn main() -> anyhow::Result<()> {
         Commands::Sync {
             sync_strat,
             force: hard,
+            model,
         } => {
             let db = sqlite::init_sqlite()?;
             let template = configuration.application.template;
@@ -57,15 +58,19 @@ fn main() -> anyhow::Result<()> {
 
             let start = std::time::Instant::now();
 
-            sqlite::setup_sqlite(&db)?;
+            sqlite::setup_sqlite(&db, &model)?;
             sqlite::insert_base_data(&db, template)?;
 
             match sync_strat {
                 SyncStrategy::Fts => sqlite::sync_fts_tnea(&db),
-                SyncStrategy::Vector => sqlite::sync_vec_tnea(&db)?,
+                SyncStrategy::Vector => {
+                    let rt = tokio::runtime::Runtime::new()?;
+                    rt.block_on(sqlite::sync_vec_tnea(&db, model))?
+                }
                 SyncStrategy::All => {
                     sqlite::sync_fts_tnea(&db);
-                    sqlite::sync_vec_tnea(&db)?;
+                    let rt = tokio::runtime::Runtime::new()?;
+                    rt.block_on(sqlite::sync_vec_tnea(&db, model))?
                 }
             }
 

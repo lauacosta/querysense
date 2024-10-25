@@ -1,5 +1,5 @@
-{% macro busqueda(url) %}
-<form action="/{{ url }}" method="GET">
+{% macro busqueda() %}
+<form id="dynamic_form">
     <section class="form-content">
         <div class="form-input">
             <label for="query">Busqueda: <span style="color: red;">*</span> </label>
@@ -10,6 +10,13 @@
                 <option value="masculino">Masculino</option>
                 <option value="femenino">Femenino</option>
             </select>
+            <label for="busqueda exacta">
+                <input type="checkbox" id="ft_search" name="busqueda exacta" onchange="updateAction()"> Busqueda exacta
+            </label>
+
+            <label for="busqueda semántica">
+                <input type="checkbox" id="semantic_search" name="busqueda semantica" onchange="updateAction()"> Busqueda semántica
+            </label>
         </div>
     </section>
 <button type="submit">Buscar</button>

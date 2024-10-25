@@ -194,7 +194,7 @@ pub fn create_embeddings(
 
             let embedding: Vec<f32> = {
                 let emb = &model.forward(&input_token_ids).unwrap();
-                let emb = normalize_l2(&emb).unwrap();
+                let emb = normalize_l2(emb).unwrap();
                 let emb = emb
                     .mean_keepdim(1)
                     .unwrap()
