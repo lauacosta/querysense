@@ -1,4 +1,18 @@
-use askama_axum::Template;
+use askama_axum::{IntoResponse, Template};
+
+pub enum DisplayableContent {
+    Common(Table),
+    RrfTable(RrfTable),
+}
+
+impl IntoResponse for DisplayableContent {
+    fn into_response(self) -> askama_axum::Response {
+        match self {
+            DisplayableContent::Common(table) => table.into_response(),
+            DisplayableContent::RrfTable(rrf_table) => rrf_table.into_response(),
+        }
+    }
+}
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -20,23 +34,92 @@ impl Default for Table {
     }
 }
 
+#[derive(Template)]
+#[template(path = "table_rrf.html")]
+pub struct RrfTable {
+    pub msg: String,
+    pub table: Vec<ReRankDisplay>,
+}
+
+impl Default for RrfTable {
+    fn default() -> Self {
+        Self {
+            msg: "No se encontraron ningun registro.".to_string(),
+            table: vec![ReRankDisplay::default()],
+        }
+    }
+}
+
+pub enum TableData {
+    Standard(Vec<TneaDisplay>),
+    Rrf(Vec<ReRankDisplay>),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TneaDisplay {
     email: String,
     edad: usize,
     sexo: String,
     template: String,
-    pub rank: f32,
+    pub score: f32,
+    match_type: String,
 }
 
 impl TneaDisplay {
-    pub fn new(email: String, edad: usize, sexo: String, template: String, rank: f32) -> Self {
+    pub fn new(
+        email: String,
+        edad: usize,
+        sexo: String,
+        template: String,
+        score: f32,
+        match_type: String,
+    ) -> Self {
         Self {
             email,
             template,
             edad,
             sexo,
-            rank,
+            score,
+            match_type,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ReRankDisplay {
+    template: String,
+    email: String,
+    edad: usize,
+    sexo: String,
+    fts_rank: i64,
+    vec_rank: i64,
+    pub combined_rank: i64,
+    vec_score: f32,
+    fts_score: f32,
+}
+
+impl ReRankDisplay {
+    pub fn new(
+        template: String,
+        email: String,
+        edad: usize,
+        sexo: String,
+        fts_rank: i64,
+        vec_rank: i64,
+        combined_rank: i64,
+        vec_score: f32,
+        fts_score: f32,
+    ) -> Self {
+        Self {
+            template,
+            email,
+            edad,
+            sexo,
+            fts_rank,
+            vec_rank,
+            combined_rank,
+            vec_score,
+            fts_score,
         }
     }
 }

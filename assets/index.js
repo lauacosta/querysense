@@ -82,19 +82,3 @@ function download_csv() {
 }
 
 document.getElementById("csv_trigger").addEventListener("click", download_csv);
-
-// function updateAction() {
-//     const form = document.getElementById('dynamic_form');
-//     const option1Checked = document.getElementById('ft_search').checked;
-//     const option2Checked = document.getElementById('semantic_search').checked;
-
-//     if (option1Checked && option2Checked) {
-//         form.action = '/endpoint-both';
-//     } else if (option1Checked) {
-//         form.action = '/ft_search';
-//     } else if (option2Checked) {
-//         form.action = '/semantic_search';
-//     } else {
-//         form.action = '/';
-//     }
-// }

@@ -22,6 +22,16 @@ pub enum Commands {
         #[arg(value_enum, short, long, default_value_t = SyncStrategy::Fts)]
         sync_strat: SyncStrategy,
 
+        /// Determina si utilizar un modelo local (actualmente es distilBERT) o remoto (Actualmente solo es "text-embedding-3-small").
+        #[arg(value_enum, short, long, default_value_t = Model::Local)]
+        model: Model,
+    },
+
+    Embed {
+        /// Input que transformar a un embedding
+        #[arg(short, long)]
+        input: String,
+        /// Determina si utilizar un modelo local (actualmente es distilBERT) o remoto (actualmente solo es "text-embedding-3-small").
         #[arg(value_enum, short, long, default_value_t = Model::Local)]
         model: Model,
     },

@@ -1,7 +1,7 @@
 use clap::Parser;
 use querysense::{
     cli::{Cli, Commands, SyncStrategy},
-    configuration, sqlite, startup,
+    configuration, openai, sqlite, startup,
 };
 use tracing::Level;
 
@@ -79,6 +79,17 @@ fn main() -> anyhow::Result<()> {
                 start.elapsed().as_millis()
             );
         }
+        Commands::Embed { input, model } => match model {
+            querysense::cli::Model::OpenAI => {
+                let client = reqwest::Client::new();
+                let rt = tokio::runtime::Runtime::new()?;
+                let output = rt.block_on(openai::embed_single(input, &client))?;
+                println!("{:?}", output);
+            }
+            querysense::cli::Model::Local => {
+                todo!()
+            }
+        },
     }
 
     Ok(())

@@ -41,7 +41,9 @@ impl Historial {
 pub enum SearchStrategy {
     Fts,
     Semantic,
-    Hybrid,
+    HybridKf,
+    HybridRrf,
+    HybridReRank,
 }
 
 impl TryFrom<String> for SearchStrategy {
@@ -51,9 +53,11 @@ impl TryFrom<String> for SearchStrategy {
         match value.to_lowercase().as_str() {
             "fts" => Ok(Self::Fts),
             "semantic_search" => Ok(Self::Semantic),
-            "hybrid_search" => Ok(Self::Hybrid),
+            "rrf" => Ok(Self::HybridRrf),
+            "hkf" => Ok(Self::HybridKf),
+            "rrs" => Ok(Self::HybridReRank),
             other => Err(format!(
-                "{other} No es una estrategia de búsqueda soportada, usa 'fts', 'semantic_search' o 'hybrid_search'",
+                "{other} No es una estrategia de búsqueda soportada, usa 'fts', 'semantic_search', 'HKF' o 'rrf'",
             )),
         }
     }
