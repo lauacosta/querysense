@@ -1,3 +1,5 @@
+use std::iter::zip;
+
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -10,16 +12,13 @@ pub enum EncodingFormat {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ResponseBody {
-    pub object: String,
-    pub data: Vec<EmbeddingObject>,
-    pub model: String,
-    pub usage: TokenUsage,
+    #[serde(rename = "data")]
+    pub embeddings: Vec<EmbeddingObject>,
+    // pub usage: TokenUsage,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EmbeddingObject {
-    object: String,
-    index: u64,
     embedding: Vec<f32>,
 }
 
@@ -31,12 +30,6 @@ impl EmbeddingObject {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct TokenUsage {
-    pub prompt_tokens: u64,
-    pub total_tokens: u64,
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct RequestBody {
     pub input: Vec<String>,
@@ -45,11 +38,13 @@ pub struct RequestBody {
     pub dimensions: Option<u64>,
 }
 
-#[instrument(name = "Generando Embeddings", skip(input, client))]
+// https://community.openai.com/t/does-the-index-field-on-an-embedding-response-correlate-to-the-index-of-the-input-text-it-was-generated-from/526099
+#[instrument(name = "Generando Embeddings", skip(input, client, indices))]
 pub async fn embed_vec(
+    indices: Vec<u64>,
     input: Vec<String>,
     client: &reqwest::Client,
-) -> anyhow::Result<Vec<Vec<f32>>> {
+) -> anyhow::Result<Vec<(u64, Vec<f32>)>> {
     let global_start = std::time::Instant::now();
 
     let request = RequestBody {
@@ -67,20 +62,27 @@ pub async fn embed_vec(
         .bearer_auth(token)
         .json(&request)
         .send()
-        .await?;
+        .await?
+        .error_for_status()?;
 
-    assert_eq!(response.status().as_u16(), 200);
     tracing::info!("El request tomó {} ms", req_start.elapsed().as_millis());
 
     let start = std::time::Instant::now();
+
     let response: ResponseBody = response.json().await?;
+
     tracing::info!(
         "Deserializar la response a ResponseBody tomó {} ms",
         start.elapsed().as_millis()
     );
 
     let start = std::time::Instant::now();
-    let embedding = EmbeddingObject::embeddings_iter(response.data).collect();
+    let embedding = zip(
+        indices,
+        EmbeddingObject::embeddings_iter(response.embeddings),
+    )
+    .collect();
+
     tracing::info!(
         "La conversión de Vec<EmbeddingObject> a Vec<Vec<f32>> tomó {} ms",
         start.elapsed().as_millis()
@@ -134,7 +136,7 @@ pub async fn embed_single(input: String, client: &reqwest::Client) -> anyhow::Re
     );
 
     let embedding = response
-        .data
+        .embeddings
         .into_iter()
         .next()
         .expect("Deberia tener minimo un elemento")

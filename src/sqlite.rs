@@ -1,5 +1,6 @@
-use std::iter::zip;
+use std::sync::{Arc, Mutex};
 
+use futures::StreamExt;
 use rusqlite::{ffi::sqlite3_auto_extension, Connection};
 use sqlite_vec::sqlite3_vec_init;
 use zerocopy::IntoBytes;
@@ -14,7 +15,7 @@ use crate::{
 use crate::embeddings;
 
 pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result<()> {
-    let mut statement = db.prepare("select id, template from tnea")?;
+ let mut statement = db.prepare("select id, template from tnea")?;
 
     let templates: Vec<(u64, String)> = match statement.query_map([], |row| {
         let id: u64 = row.get(0)?;
@@ -27,74 +28,61 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result
         Err(err) => return Err(anyhow::anyhow!(err)),
     };
 
-    let mut statement =
-        db.prepare("insert into vec_tnea(row_id, template_embedding) values (?,?)")?;
-    let mut inserted = 0;
-
+    let inserted = Arc::new(Mutex::new(0));
     let chunk_size = 2048;
 
-    let templates_chunks: Vec<_> = templates
-        .chunks(chunk_size)
-        .map(<[(u64, std::string::String)]>::to_vec)
-        .collect();
 
     tracing::info!("Generando embeddings...");
-    for chunk in templates_chunks {
-        let results: Vec<(u64, Vec<f32>)> = match model {
-            #[cfg(feature = "local")]
-            cli::Model::Local => embeddings::create_embeddings(
-                chunk,
-                embeddings::Args::new(
-                    true,
-                    Some("t5-small".to_string()),
-                    None,
-                    None,
-                    None,
-                    None,
-                    embeddings::Model::T5Small,
-                ),
-            )
-            .map_err(|err| {
-                anyhow::anyhow!("Algo ocurrió durante la creación de los embeddings: {err}")
-            })?,
-            cli::Model::OpenAI => {
-                let client = reqwest::Client::new();
-                let indices: Vec<u64> = chunk.iter().map(|(id, _)| *id).collect();
-                let templates: Vec<String> =
-                    chunk.into_iter().map(|(_, template)| template).collect();
 
-                let result = openai::embed_vec(templates, &client).await?;
+    let client = reqwest::Client::new();
+    let jh = templates.chunks(chunk_size).into_iter().map(|chunk| match model {
+        #[cfg(feature = "local")]
+        cli::Model::Local => async { Err(anyhow!("Local model is unimplemented")) },
+        cli::Model::OpenAI => {
+            let indices: Vec<u64> = chunk.into_iter().map(|(id, _)| *id).collect();
+            let templates: Vec<String> = chunk.into_iter().map(|(_, template)| template.clone()).collect();
 
-                // https://community.openai.com/t/does-the-index-field-on-an-embedding-response-correlate-to-the-index-of-the-input-text-it-was-generated-from/526099
-                zip(indices, result).collect()
+            openai::embed_vec(indices,templates, &client)
+        },
+    });
+
+    let stream = futures::stream::iter(jh);
+
+    let start = std::time::Instant::now();
+    tracing::info!("Insertando nuevas columnas en vec_tnea...");
+
+    stream.for_each_concurrent(Some(5), |future| {
+        let inserted = Arc::clone(&inserted); 
+        async move {
+            match future.await {
+                Ok(data) => {
+                    let mut statement =
+                        db.prepare("insert into vec_tnea(row_id, template_embedding) values (?,?)").unwrap();
+                    db.execute("BEGIN TRANSACTION", []).expect(
+                        "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
+                    );
+                    for (id, embedding) in data {
+                        tracing::debug!("{id} - {embedding:?}");
+                        statement.execute(
+                            rusqlite::params![id, embedding.as_bytes()],
+                        ).expect("Error inserting into vec_tnea");
+                        let mut inserted = inserted.lock().unwrap();
+                        *inserted += 1;
+                    }
+                    db.execute("COMMIT", []).expect(
+                        "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
+                    );
+                }
+                Err(err) => eprintln!("Error processing chunk: {}", err),
             }
-        };
-
-        let start = std::time::Instant::now();
-        tracing::info!("Insertando nuevas columnas en vec_tnea...");
-
-        db.execute("BEGIN TRANSACTION", []).expect(
-            "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
-        );
-
-        for (id, embedding) in results {
-            tracing::debug!("{id} - {embedding:?}");
-            statement.execute(rusqlite::params![id, embedding.as_bytes()])
-                .map_err(|err| anyhow::anyhow!(err))
-                .expect("Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite");
-            inserted += 1;
         }
+    }).await;
 
-        db.execute("COMMIT", []).expect(
-            "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
-        );
-
-        tracing::info!(
-            "Insertando nuevos registros en vec_tnea... se insertaron {} registros, en {} ms",
-            inserted,
-            start.elapsed().as_millis()
-        );
-    }
+    tracing::info!(
+        "Insertando nuevos registros en vec_tnea... se insertaron {} registros, en {} ms",
+        inserted.lock().unwrap(),
+        start.elapsed().as_millis()
+    );
 
     tracing::info!("Generando embeddings... listo!");
 
