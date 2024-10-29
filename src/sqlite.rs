@@ -6,9 +6,12 @@ use zerocopy::IntoBytes;
 
 use crate::{
     cli::{self, Model},
-    configuration, embeddings, openai,
+    configuration, openai,
     utils::{self, TneaData},
 };
+
+#[cfg(feature = "local")]
+use crate::embeddings;
 
 pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result<()> {
     let mut statement = db.prepare("select id, template from tnea")?;
@@ -30,11 +33,15 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result
 
     let chunk_size = 2048;
 
-    let templates_chunks: Vec<_> = templates.chunks(chunk_size).map(|v| v.to_vec()).collect();
+    let templates_chunks: Vec<_> = templates
+        .chunks(chunk_size)
+        .map(<[(u64, std::string::String)]>::to_vec)
+        .collect();
 
     tracing::info!("Generando embeddings...");
     for chunk in templates_chunks {
-        let results = match model {
+        let results: Vec<(u64, Vec<f32>)> = match model {
+            #[cfg(feature = "local")]
             cli::Model::Local => embeddings::create_embeddings(
                 chunk,
                 embeddings::Args::new(
@@ -183,6 +190,8 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> anyhow::Result<
             template_embedding float[1536]
         );"
             }
+
+            #[cfg(feature = "local")]
             Model::Local => {
                 "create virtual table if not exists vec_tnea using vec0(
             row_id integer primary key,
@@ -203,7 +212,7 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> anyhow::Result<
 
 pub fn insert_base_data(
     db: &rusqlite::Connection,
-    template: configuration::Template,
+    template: &configuration::Template,
 ) -> anyhow::Result<()> {
     let num: usize = db.query_row("select count(*) from tnea", [], |row| row.get(0))?;
 
@@ -213,7 +222,7 @@ pub fn insert_base_data(
         return Ok(());
     }
 
-    let tnea_data: Vec<TneaData> = utils::parse_and_embed("./csv/", &template)?;
+    let tnea_data: Vec<TneaData> = utils::parse_and_embed("./csv/", template)?;
 
     tracing::info!("Abriendo transacción para insertar datos en la tabla `tnea_raw` y `tnea`!");
 

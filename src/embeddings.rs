@@ -1,6 +1,5 @@
 // Implementado en base a los ejemplos en:
 // https://github.com/huggingface/candle/tree/main/candle-examples/examples/t5
-
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -31,7 +30,7 @@ pub enum Model {
 pub struct Args {
     // Ejecutarlo en la CPU en vez de la GPU.
     cpu: bool,
-    /// El repositorio del modelo en HuggingFace.
+    /// El repositorio del modelo en `HuggingFace`.
     model_id: Option<String>,
     revision: Option<String>,
     model_file: Option<String>,
@@ -42,6 +41,7 @@ pub struct Args {
 }
 
 impl Args {
+    #[must_use]
     pub fn new(
         cpu: bool,
         model_id: Option<String>,
@@ -79,7 +79,7 @@ impl T5ModelBuilder {
         };
         let default_model = default_model.to_string();
         let default_revision = default_revision.to_string();
-        let (model_id, revision) = match (args.model_id.to_owned(), args.revision.to_owned()) {
+        let (model_id, revision) = match (args.model_id.clone(), args.revision.clone()) {
             (Some(model_id), Some(revision)) => (model_id, revision),
             (Some(model_id), None) => (model_id, "main".to_string()),
             (None, Some(revision)) => (default_model, revision),
@@ -104,7 +104,10 @@ impl T5ModelBuilder {
             Some(f) => f.into(),
         };
         let weights_filename = match &args.model_file {
-            Some(f) => f.split(',').map(|v| v.into()).collect::<Vec<_>>(),
+            Some(f) => f
+                .split(',')
+                .map(std::convert::Into::into)
+                .collect::<Vec<_>>(),
             None => {
                 if model_id == "google/flan-t5-xxl" || model_id == "google/flan-ul2" {
                     hub_load_safetensors(&repo, "model.safetensors.index.json").map_err(|err| {
@@ -177,7 +180,7 @@ pub fn create_embeddings(
 
         let mut local_embeddings: Vec<(u64, Vec<f32>)> = Vec::with_capacity(templates_chunk.len());
 
-        for (id, str) in templates_chunk.iter() {
+        for (id, str) in *templates_chunk {
             let tokens = tokenizer
                 .encode(str.to_owned(), true)
                 .map_err(E::msg)
@@ -282,84 +285,3 @@ pub fn hub_load_safetensors(
         .collect::<Result<Vec<_>>>()?;
     Ok(safetensors_files)
 }
-
-// INFO: Version con un solo hilo.
-// #[instrument(name = "Generando Embeddings", skip(templates, args))]
-// #[instrument(name = "Generando Embeddings", skip(templates, args))]
-// pub fn create_embeddings(
-//     templates: Vec<(u64, String)>,
-//     args: Args,
-// ) -> anyhow::Result<Vec<(u64, Vec<f32>)>> {
-//     let start = std::time::Instant::now();
-
-//     tracing::info!("Cargando el modelo...");
-//     let (builder, mut tokenizer) = T5ModelBuilder::load(&args)?;
-//     let device = &builder.device;
-//     let tokenizer = tokenizer
-//         .with_padding(None)
-//         .with_truncation(None)
-//         .map_err(E::msg)?;
-
-//     tracing::info!("Cargando el modelo... listo!");
-
-//     let chunk_size = templates.len() / 10;
-
-//     let mut embeddings: Vec<(u64, Vec<f32>)> = Vec::with_capacity(templates.len());
-
-//     let mut times_millis: Vec<u128> = Vec::with_capacity(templates.len() / chunk_size);
-
-//     tracing::info!(
-//         "Procesando {} templates en bloques de {}...",
-//         templates.len(),
-//         chunk_size,
-//     );
-
-//     for templates_chunk in templates.chunks(chunk_size) {
-//         let start = std::time::Instant::now();
-
-//         for temp in templates_chunk.iter().enumerate() {
-//             let (_idx, input) = temp;
-//             let (id, str) = input;
-
-//             let tokens = tokenizer
-//                 .encode(str.to_owned(), true)
-//                 .map_err(E::msg)?
-//                 .get_ids()
-//                 .to_vec();
-//             let input_token_ids = Tensor::new(&tokens[..], device)?.unsqueeze(0)?;
-
-//             let mut model = builder.build_encoder()?;
-
-//             let embedding: Vec<f32> = {
-//                 let emb = &model.forward(&input_token_ids)?;
-//                 let emb = normalize_l2(&emb)?;
-//                 let emb = emb.mean_keepdim(1)?.squeeze(0)?.squeeze(0)?;
-//                 emb.to_vec1()?
-//             };
-
-//             embeddings.push((*id, embedding));
-//             // embeddings[idx] = (*id, embedding);
-//         }
-//         let time = start.elapsed().as_millis();
-//         times_millis.push(time);
-//         tracing::info!("Procesar {} templates tomó {:?} ms", chunk_size, time);
-//     }
-
-//     tracing::info!(
-//         "Procesar {} templates, en bloques de {} tomó {:?} ms",
-//         templates.len(),
-//         chunk_size,
-//         start.elapsed().as_millis()
-//     );
-
-//     let sum_millis: u128 = times_millis.iter().sum();
-//     let mean = sum_millis as f64 / times_millis.len() as f64;
-
-//     tracing::info!(
-//         "La media de tiempo por cada {} templates es de: {} ms",
-//         chunk_size,
-//         mean
-//     );
-
-//     Ok(embeddings)
-// }

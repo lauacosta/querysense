@@ -1,4 +1,5 @@
 use axum::handler::HandlerWithoutStateExt;
+use std::net::IpAddr;
 use std::sync::Arc;
 
 use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
@@ -9,19 +10,20 @@ use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, Level};
 
-use crate::configuration::{self, FeatureState};
+use crate::cli::Cache;
+use crate::configuration::{self, ApplicationSettings};
+use crate::routes;
 use crate::sqlite::init_sqlite;
-use crate::{configuration::Settings, routes};
 
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub db: Arc<Mutex<rusqlite::Connection>>,
-    pub cache: FeatureState,
+    pub cache: Cache,
 }
 
 pub struct Application {
     pub port: u16,
-    pub host: String,
+    pub host: IpAddr,
     pub server: Serve<Router, Router>,
 }
 
@@ -34,20 +36,15 @@ impl Application {
     /// 1. Vincular un `tokio::net::TcpListener` a la dirección dada.
     /// 2. Falla en conectarse con el servidor de `MeiliSearch`.
     #[tracing::instrument(name = "Construyendo la aplicación.", skip(configuration))]
-    pub async fn build(configuration: Settings) -> anyhow::Result<Self> {
-        let address = format!(
-            "{}:{}",
-            configuration.application.host, configuration.application.port
-        );
+    pub async fn build(configuration: ApplicationSettings) -> anyhow::Result<Self> {
+        let address = format!("{}:{}", configuration.host, configuration.port);
 
         tracing::debug!("Definiendo la direccion HTTP...");
         let listener = match tokio::net::TcpListener::bind(&address).await {
             Ok(listener) => listener,
             Err(err) => {
                 tracing::error!("{err}. Tratando con otro puerto...");
-                match tokio::net::TcpListener::bind(format!("{}:0", configuration.application.host))
-                    .await
-                {
+                match tokio::net::TcpListener::bind(format!("{}:0", configuration.host)).await {
                     Ok(listener) => listener,
                     Err(err) => {
                         tracing::error!("No hay puertos disponibles, finalizando la aplicación...");
@@ -62,12 +59,12 @@ impl Application {
             .expect("Fallo al encontrar la local address")
             .port();
 
-        let host = configuration.application.host;
+        let host = configuration.host;
 
         tracing::debug!("Definiendo la direccion HTTP listo!");
 
         let db = Arc::new(Mutex::new(init_sqlite()?));
-        let cache = configuration.application.cache;
+        let cache = configuration.cache;
 
         let state = AppState { db, cache };
 
@@ -81,7 +78,7 @@ impl Application {
     }
 
     pub fn host(&self) -> String {
-        self.host.clone()
+        self.host.to_string()
     }
 
     /// # Errors
@@ -159,7 +156,7 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
     axum::serve(listener, server)
 }
 
-pub async fn run_server(configuration: configuration::Settings) -> anyhow::Result<()> {
+pub async fn run_server(configuration: configuration::ApplicationSettings) -> anyhow::Result<()> {
     tracing::info!("Iniciando el servidor...");
     match Application::build(configuration).await {
         Ok(app) => {

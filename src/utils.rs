@@ -33,9 +33,9 @@ where
 {
     let s: Option<String> = Option::deserialize(deserializer)?;
     Ok(match s {
-        Some(ref s) if s.is_empty() => "No definido".to_string(),
+        Some(ref s) if s.is_empty() => String::new(),
         Some(s) => s,
-        None => "No definido".to_string(),
+        None => String::new(),
     })
 }
 
@@ -76,7 +76,7 @@ pub fn parse_and_embed(
         let headers: Vec<String> = reader
             .headers()?
             .into_iter()
-            .map(|v| v.to_string())
+            .map(std::string::ToString::to_string)
             .collect();
 
         for field in &template.fields {

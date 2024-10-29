@@ -1,199 +1,18 @@
-use camino::Utf8Path;
-use config::Config;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use serde::{de, Deserialize, Deserializer};
-use serde_aux::prelude::deserialize_number_from_string;
-use std::{
-    sync::{mpsc::channel, RwLock},
-    time::Duration,
-};
+use std::net::IpAddr;
 
-// https://github.com/mehcode/config-rs/blob/master/examples/watch/main.rs
-lazy_static::lazy_static! {
-    static ref SETTINGS: RwLock<Config> = {
-        let base_path = std::env::current_dir().expect("Fallo al determinar el directorio actual");
-        let configuration_directory = base_path.join("configuration");
+use crate::cli::Cache;
 
-        let environment: Environment = std::env::var("APP_ENVIRONMENT")
-        .unwrap_or_else(|_| "local".into())
-        .try_into()
-        .expect("Fallo al parsear APP_ENVIRONMENT.");
-
-        let settings = config::Config::builder()
-        .add_source(config::File::from(configuration_directory.join("base")).required(true))
-        .add_source(
-            config::File::from(configuration_directory.join(environment.as_str()))
-            .required(true),
-        )
-        .add_source(config::Environment::with_prefix("app").separator("__"))
-        .build()
-        .expect("Fallo al parsear el archivo de configuración.");
-
-        RwLock::new(settings)
-    };
-
-    // pub static ref DATABASE: Arc<Mutex<rusqlite::Connection>> = {
-    //     unsafe {
-    //         sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
-    //     }
-    //     let path = std::env::var("DATABASE_URL").map_err(|err| {
-    //         anyhow::anyhow!(
-    //             "La variable de ambiente `DATABASE_URL` no fue encontrada. {}",
-    //             err
-    //         )
-    //     }).unwrap();
-
-    //     Arc::new(Mutex::new(rusqlite::Connection::open(path).unwrap()))
-    // };
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct Settings {
-    pub application: ApplicationSettings,
-}
-
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Clone)]
 pub struct ApplicationSettings {
-    #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
-    pub host: String,
-    pub cache: FeatureState,
-    pub template: Template,
+    pub host: IpAddr,
+    pub cache: Cache,
 }
 
-#[derive(Debug, Deserialize, Clone)]
-pub enum FeatureState {
-    Enabled,
-    Disabled,
-}
-
-/// # Errors
-///
-/// Devolverá error si no es capaz de:
-/// 1. Determinar el directorio actual.
-/// 2. Parsear un `APP_ENVIRONMENT` válido.
-/// 3. Parsear correctamente el archivo de configuración `.yml`.
-/// 4. Deserializar el archivo de configuracion en `Settings`
-///
-/// # Panics
-///
-/// Entrará en pánico si no es capaz de
-/// 1. Determinar el directorio actual.
-/// 2. Parsear un `APP_ENVIRONMENT` válido.
-/// 3. Parsear correctamente el archivo de configuración `.yml`.
-/// 4. Deserializar el archivo de configuracion en `Settings`
-#[tracing::instrument]
-pub fn from_configuration() -> Result<Settings, config::ConfigError> {
-    tracing::debug!("Leyendo la configuracion...");
-    let settings: Settings = SETTINGS
-        .read()
-        .expect("Fallo al leer RwLock<Config>")
-        .clone()
-        .try_deserialize()
-        .expect("Fallo al deserializar la configuración en la struct Settings");
-
-    std::thread::spawn(|| {
-        let (tx, _rx) = channel();
-
-        let mut watcher: RecommendedWatcher = Watcher::new(
-            tx,
-            notify::Config::default().with_poll_interval(Duration::from_secs(2)),
-        )
-        .expect("Falla al crear un nuevo `Watcher`");
-
-        watcher
-            .watch(
-                Utf8Path::new("configuration").as_std_path(),
-                RecursiveMode::Recursive,
-            )
-            .expect("Falla al observar el path `/configuration/`");
-
-        // loop {
-        //     match rx.recv() {
-        //         Ok(Ok(Event {
-        //             kind: notify::event::EventKind::Modify(_),
-        //             ..
-        //         })) => {
-        //             println!(" * Settings.toml written; refreshing configuration ...");
-        //             SETTINGS.write().unwrap().refresh().unwrap();
-        //             show();
-        //         }
-
-        //         Err(e) => println!("watch error: {:?}", e),
-
-        //         _ => {
-        //             // Ignore event
-        //         }
-        //     }
-        // }
-    });
-
-    tracing::debug!("Leyendo la configuracion listo!");
-    Ok(settings)
-}
-
-#[derive(Clone, Debug, Deserialize)]
-pub enum EmbedderSource {
-    OpenAi,
-    HuggingFace,
-    Ollama,
-    Rest,
-}
-
-impl EmbedderSource {
+impl ApplicationSettings {
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::OpenAi => "openAi",
-            Self::HuggingFace => "huggingFace",
-            Self::Ollama => "ollama",
-            Self::Rest => "rest",
-        }
-    }
-}
-
-impl TryFrom<String> for EmbedderSource {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.to_lowercase().as_str() {
-            "ollama" => Ok(Self::Ollama),
-            "openai" => Ok(Self::OpenAi),
-            "rest" => Ok(Self::Rest),
-            "huggingface" => Ok(Self::HuggingFace),
-            other => Err(format!(
-                "{other} No es un proveedor soportado, usa 'ollama', 'hugginface', 'openai' o 'rest'",
-            )),
-        }
-    }
-}
-
-pub enum Environment {
-    Local,
-    Production,
-}
-
-impl Environment {
-    #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Environment::Local => "local",
-            Environment::Production => "production",
-        }
-    }
-}
-
-impl TryFrom<String> for Environment {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.to_lowercase().as_str() {
-            "local" => Ok(Self::Local),
-            "production" => Ok(Self::Production),
-            other => Err(format!(
-                "{other} No es un ambiente soportado, usa 'local' o 'production'",
-            )),
-        }
+    pub fn new(port: u16, host: IpAddr, cache: Cache) -> Self {
+        Self { port, host, cache }
     }
 }
 
@@ -203,17 +22,12 @@ pub struct Template {
     pub fields: Vec<String>,
 }
 
-impl<'de> Deserialize<'de> for Template {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let str: String = String::deserialize(deserializer)?;
+impl TryFrom<String> for Template {
+    type Error = anyhow::Error;
 
-        if str.is_empty() {
-            return Err(de::Error::custom(
-                "Un template no puede ser un string vacío",
-            ));
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            return Err(anyhow::anyhow!("Un template no puede ser un string vacío",));
         }
 
         let mut start = 0;
@@ -222,12 +36,12 @@ impl<'de> Deserialize<'de> for Template {
         let mut fields = Vec::new();
         let mut sql_template = String::new();
 
-        while let Some(open_idx) = str[start..].find("{{") {
-            if let Some(close_idx) = str[start + open_idx..].find("}}") {
-                let field = &str[start + open_idx + separator_len..start + open_idx + close_idx];
+        while let Some(open_idx) = value[start..].find("{{") {
+            if let Some(close_idx) = value[start + open_idx..].find("}}") {
+                let field = &value[start + open_idx + separator_len..start + open_idx + close_idx];
                 fields.push(field.trim().to_string());
 
-                let label = &str[start..start + open_idx].trim();
+                let label = &value[start..start + open_idx].trim();
 
                 if !sql_template.is_empty() {
                     sql_template.push(' ');
@@ -236,7 +50,7 @@ impl<'de> Deserialize<'de> for Template {
 
                 start += open_idx + close_idx + separator_len;
             } else {
-                return Err(de::Error::custom("El template está mal conformado"));
+                return Err(anyhow::anyhow!("El template está mal conformado"));
             }
         }
 
@@ -244,8 +58,8 @@ impl<'de> Deserialize<'de> for Template {
             sql_template.truncate(sql_template.len() - 3);
         }
 
-        if start < str.len() {
-            let remaining_text = &str[start..].trim();
+        if start < value.len() {
+            let remaining_text = &value[start..].trim();
             if !remaining_text.is_empty() {
                 if !sql_template.is_empty() {
                     sql_template.push(' ');

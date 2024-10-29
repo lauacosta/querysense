@@ -1,4 +1,4 @@
-use crate::configuration::FeatureState;
+use crate::cli::Cache;
 use crate::routes::Historial;
 use crate::startup::AppState;
 use axum::http::StatusCode;
@@ -10,7 +10,7 @@ pub async fn get_from_db(
     State(AppState { db, cache, .. }): State<AppState>,
 ) -> (StatusCode, Json<Vec<Historial>>) {
     match cache {
-        FeatureState::Enabled => {
+        Cache::Enabled => {
             let err_handler = |err| {
                 tracing::warn!("Fallo al retirar registros de la tabla historial!, {}", err);
                 (
@@ -57,7 +57,7 @@ Ok(stmt) => stmt,
             (StatusCode::OK, Json(result))
         }
 
-        FeatureState::Disabled => {
+        Cache::Disabled => {
             tracing::info!("El caché se encuentra desactivado!");
             (StatusCode::NO_CONTENT, Json(vec![Historial::default()]))
         }

@@ -4,7 +4,7 @@ use tracing::instrument;
 use zerocopy::IntoBytes;
 
 use crate::{
-    configuration::FeatureState,
+    cli::Cache,
     openai,
     routes::SearchStrategy,
     startup::AppState,
@@ -25,10 +25,10 @@ pub async fn search(
     State(app): State<AppState>,
 ) -> DisplayableContent {
     match app.cache {
-        FeatureState::Enabled => {
+        Cache::Enabled => {
             todo!();
         }
-        FeatureState::Disabled => tracing::debug!("El caché se encuentra desactivado!"),
+        Cache::Disabled => tracing::debug!("El caché se encuentra desactivado!"),
     };
     let db = app.db.lock().await;
 
@@ -209,7 +209,7 @@ pub async fn search(
                     let sexo: String = row.get(3).unwrap_or_default();
                     let fts_rank: i64= row.get(4).unwrap_or_default();
                     let vec_rank: i64= row.get(5).unwrap_or_default();
-                    let combined_rank: i64= row.get(6).unwrap_or_default();
+                    let combined_rank: f32 = row.get(6).unwrap_or_default();
                     let vec_score: f32= row.get(7).unwrap_or_default();
                     let fts_score: f32= row.get(8).unwrap_or_default();
 

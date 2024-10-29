@@ -22,15 +22,26 @@ fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt().with_max_level(level).init();
 
-    let configuration =
-        configuration::from_configuration().expect("Fallo al leer la configuración");
+    let template = std::env::var("TEMPLATE").map_err(|err| {
+        anyhow::anyhow!("Hubo un error al leer la variable de entorno `TEMPLATE` {err}.")
+    })?;
+
+    let template = configuration::Template::try_from(template)
+        .map_err(|err| anyhow::anyhow!("Hubo un error al parsear el template {err}"))?;
 
     match cli.command {
-        Commands::Serve => {
+        Commands::Serve {
+            interface,
+            port,
+            cache,
+        } => {
+            let configuration = configuration::ApplicationSettings::new(port, interface, cache);
+
             tracing::debug!("{:?}", &configuration);
             let rt = tokio::runtime::Runtime::new()?;
+
             match rt.block_on(startup::run_server(configuration)) {
-                Ok(_) => (),
+                Ok(()) => (),
                 Err(err) => return Err(err),
             }
         }
@@ -40,7 +51,6 @@ fn main() -> anyhow::Result<()> {
             model,
         } => {
             let db = sqlite::init_sqlite()?;
-            let template = configuration.application.template;
 
             if hard {
                 let exists: String = db.query_row(
@@ -59,18 +69,18 @@ fn main() -> anyhow::Result<()> {
             let start = std::time::Instant::now();
 
             sqlite::setup_sqlite(&db, &model)?;
-            sqlite::insert_base_data(&db, template)?;
+            sqlite::insert_base_data(&db, &template)?;
 
             match sync_strat {
                 SyncStrategy::Fts => sqlite::sync_fts_tnea(&db),
                 SyncStrategy::Vector => {
                     let rt = tokio::runtime::Runtime::new()?;
-                    rt.block_on(sqlite::sync_vec_tnea(&db, model))?
+                    rt.block_on(sqlite::sync_vec_tnea(&db, model))?;
                 }
                 SyncStrategy::All => {
                     sqlite::sync_fts_tnea(&db);
                     let rt = tokio::runtime::Runtime::new()?;
-                    rt.block_on(sqlite::sync_vec_tnea(&db, model))?
+                    rt.block_on(sqlite::sync_vec_tnea(&db, model))?;
                 }
             }
 
@@ -84,8 +94,10 @@ fn main() -> anyhow::Result<()> {
                 let client = reqwest::Client::new();
                 let rt = tokio::runtime::Runtime::new()?;
                 let output = rt.block_on(openai::embed_single(input, &client))?;
-                println!("{:?}", output);
+                println!("{output:?}");
             }
+
+            #[cfg(feature = "local")]
             querysense::cli::Model::Local => {
                 todo!()
             }

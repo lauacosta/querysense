@@ -23,6 +23,7 @@ pub struct Historial {
 }
 
 impl Historial {
+    #[must_use]
     pub fn new(
         id: usize,
         query: String,

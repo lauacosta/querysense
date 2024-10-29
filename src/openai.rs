@@ -37,20 +37,20 @@ pub struct TokenUsage {
     pub total_tokens: u64,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct RequestBody {
+    pub input: Vec<String>,
+    pub model: String,
+    pub encoding_format: Option<EncodingFormat>,
+    pub dimensions: Option<u64>,
+}
+
 #[instrument(name = "Generando Embeddings", skip(input, client))]
 pub async fn embed_vec(
     input: Vec<String>,
     client: &reqwest::Client,
 ) -> anyhow::Result<Vec<Vec<f32>>> {
     let global_start = std::time::Instant::now();
-
-    #[derive(Serialize, Deserialize)]
-    pub struct RequestBody {
-        pub input: Vec<String>,
-        pub model: String,
-        pub encoding_format: Option<EncodingFormat>,
-        pub dimensions: Option<u64>,
-    }
 
     let request = RequestBody {
         input,

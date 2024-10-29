@@ -66,6 +66,7 @@ pub struct TneaDisplay {
 }
 
 impl TneaDisplay {
+    #[must_use]
     pub fn new(
         email: String,
         edad: usize,
@@ -76,9 +77,9 @@ impl TneaDisplay {
     ) -> Self {
         Self {
             email,
-            template,
             edad,
             sexo,
+            template,
             score,
             match_type,
         }
@@ -93,12 +94,13 @@ pub struct ReRankDisplay {
     sexo: String,
     fts_rank: i64,
     vec_rank: i64,
-    pub combined_rank: i64,
+    pub combined_rank: f32,
     vec_score: f32,
     fts_score: f32,
 }
 
 impl ReRankDisplay {
+    #[must_use]
     pub fn new(
         template: String,
         email: String,
@@ -106,7 +108,7 @@ impl ReRankDisplay {
         sexo: String,
         fts_rank: i64,
         vec_rank: i64,
-        combined_rank: i64,
+        combined_rank: f32,
         vec_score: f32,
         fts_score: f32,
     ) -> Self {
