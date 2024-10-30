@@ -15,7 +15,7 @@ use crate::{
 use crate::embeddings;
 
 pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result<()> {
- let mut statement = db.prepare("select id, template from tnea")?;
+    let mut statement = db.prepare("select id, template from tnea")?;
 
     let templates: Vec<(u64, String)> = match statement.query_map([], |row| {
         let id: u64 = row.get(0)?;
@@ -31,20 +31,25 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result
     let inserted = Arc::new(Mutex::new(0));
     let chunk_size = 2048;
 
-
     tracing::info!("Generando embeddings...");
 
     let client = reqwest::Client::new();
-    let jh = templates.chunks(chunk_size).into_iter().map(|chunk| match model {
-        #[cfg(feature = "local")]
-        cli::Model::Local => async { Err(anyhow!("Local model is unimplemented")) },
-        cli::Model::OpenAI => {
-            let indices: Vec<u64> = chunk.into_iter().map(|(id, _)| *id).collect();
-            let templates: Vec<String> = chunk.into_iter().map(|(_, template)| template.clone()).collect();
+    let jh = templates
+        .chunks(chunk_size)
+        .into_iter()
+        .map(|chunk| match model {
+            #[cfg(feature = "local")]
+            cli::Model::Local => async { Err(anyhow!("Local model is unimplemented")) },
+            cli::Model::OpenAI => {
+                let indices: Vec<u64> = chunk.into_iter().map(|(id, _)| *id).collect();
+                let templates: Vec<String> = chunk
+                    .into_iter()
+                    .map(|(_, template)| template.clone())
+                    .collect();
 
-            openai::embed_vec(indices,templates, &client)
-        },
-    });
+                openai::embed_vec(indices, templates, &client)
+            }
+        });
 
     let stream = futures::stream::iter(jh);
 
@@ -52,7 +57,7 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result
     tracing::info!("Insertando nuevas columnas en vec_tnea...");
 
     stream.for_each_concurrent(Some(5), |future| {
-        let inserted = Arc::clone(&inserted); 
+        let inserted = Arc::clone(&inserted);
         async move {
             match future.await {
                 Ok(data) => {
