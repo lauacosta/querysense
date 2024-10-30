@@ -66,8 +66,7 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result
                         statement.execute(
                             rusqlite::params![id, embedding.as_bytes()],
                         ).expect("Error inserting into vec_tnea");
-                        let mut inserted = inserted.lock().unwrap();
-                        *inserted += 1;
+                        *inserted.lock().unwrap() += 1;
                     }
                     db.execute("COMMIT", []).expect(
                         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",

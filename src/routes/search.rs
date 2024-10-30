@@ -310,7 +310,81 @@ pub async fn search(
             };
             TableData::Standard(rows)
         }
-        SearchStrategy::HybridReRank => todo!(),
+        SearchStrategy::HybridReRank => {
+            let client = reqwest::Client::new();
+            let query_emb = openai::embed_single(params.query.clone(), &client)
+                .await
+                .map_err(|err| tracing::error!("{err}"))
+                .expect("Fallo al crear un embedding del query");
+
+            let k: i64 = 1000;
+
+            let mut statement = match db.prepare(
+                "
+                with fts_matches as (
+                select
+                    rowid,
+                    rank as score
+                from fts_tnea
+                where template match :query
+                limit :k
+                ),
+
+                embeddings AS (
+                    SELECT
+                        row_id as rowid,
+                        template_embedding
+                    FROM vec_tnea
+                    WHERE row_id IN (SELECT rowid FROM fts_matches)
+                ),
+
+                final as (
+                select
+                    tnea.template,
+                    tnea.email,
+                    tnea.edad,
+                    tnea.sexo,
+                    fts_matches.score,
+                    'fts' as match_type
+                from fts_matches
+                left join tnea on tnea.id = fts_matches.rowid
+                left join embeddings on embeddings.rowid = fts_matches.rowid
+                order by vec_distance_cosine(:embedding, embeddings.template_embedding)
+                )
+                select * from final;
+                ",
+            ) {
+                Ok(stmt) => stmt,
+                Err(err) => {
+                    tracing::warn!("{}", err);
+                    return DisplayableContent::Common(Table::default());
+                }
+            };
+
+            let rows = match statement.query_map(
+                rusqlite::named_params! { ":embedding": query_emb.as_bytes(), ":query": params.query, ":k": k},
+                |row| {
+                    let template: String = row.get(0).unwrap_or_default();
+                    let email: String = row.get(1).unwrap_or_default();
+                    let edad: usize = row.get(2).unwrap_or_default();
+                    let sexo: String = row.get(3).unwrap_or_default();
+                    let score: f32 = row.get(4).unwrap_or_default();
+                    let match_type: String = row.get(5).unwrap_or_default();
+
+                    let data = TneaDisplay::new(email, edad, sexo, template, score, match_type);
+                    Ok(data)
+                },
+            ) {
+                Ok(rows) => rows
+                    .collect::<Result<Vec<TneaDisplay>, _>>()
+                    .unwrap_or_default(),
+                Err(err) => {
+                    tracing::warn!("{}", err);
+                        return DisplayableContent::Common(Table::default());
+                }
+            };
+            TableData::Standard(rows)
+        }
     };
 
     match table {
