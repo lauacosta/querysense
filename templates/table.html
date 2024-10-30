@@ -1,0 +1,43 @@
+{%- import "./componentes/form.html" as scope -%}
+{% extends "base.html" %}
+
+{% block content %}
+    <div>
+        {% call scope::busqueda("search") %}
+    </div>
+    <div class="table-header">
+        <div class="result-count">{{ msg }}</div>
+        <div class="pagination"></div> 
+        <button id="csv_trigger">Descargar CSV</button>
+    </div>
+
+
+    <div class="table-container">
+        <table class="content" id="table-content">
+            <thead>
+                <tr>
+                    <th scope="col">Puntaje</th>
+                    <th scope="col">Correo</th>
+                    <th scope="col">Edad</th>
+                    <th scope="col">Sexo</th>
+                    <th scope="col">Template</th>
+                    <th scope="col">Estrategia</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in table %}
+                <tr>
+                    <td> {{ row.score }} </td>
+                    <td> {{ row.email }} </td>
+                    <td> {{ row.edad }} </td>
+                    <td> {{ row.sexo }} </td> 
+                    <td> {{ row.template|safe }} </td> 
+                    <td> {{ row.match_type}} </td>
+                </tr>
+                {% endfor %} 
+            </tbody>
+        </table>
+        <p style="color:green;"> <b>* Las palabras resaltadas en verde son los resultados encontrados usando FTS!</b> </p>
+    </div>
+{% endblock content %}
+

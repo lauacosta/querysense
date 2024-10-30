@@ -1,0 +1,7 @@
+{%- import "./componentes/form.html" as scope -%}
+{% extends "base.html" %}
+
+{% block content %}
+    {% call scope::busqueda("search") %}
+{% endblock content %}
+

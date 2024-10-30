@@ -1,264 +1,76 @@
-use config::Config;
-use meilisearch_sdk::features::ExperimentalFeatures;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use secrecy::{ExposeSecret, Secret};
-use serde::{Deserialize, Serialize};
-use serde_aux::prelude::deserialize_number_from_string;
-use serde_json::json;
-use std::{
-    path::Path,
-    sync::{mpsc::channel, RwLock},
-    time::Duration,
-};
+use std::net::IpAddr;
 
-pub const MAX_HITS: usize = 80_000;
+use crate::cli::Cache;
 
-// https://github.com/mehcode/config-rs/blob/master/examples/watch/main.rs
-lazy_static::lazy_static! {
-    static ref SETTINGS: RwLock<Config> = {
-        let base_path = std::env::current_dir().expect("Fallo al determinar el directorio actual");
-        let configuration_directory = base_path.join("configuration");
-
-        let environment: Environment = std::env::var("APP_ENVIRONMENT")
-        .unwrap_or_else(|_| "local".into())
-        .try_into()
-        .expect("Fallo al parsear APP_ENVIRONMENT.");
-        let settings = config::Config::builder()
-        .add_source(config::File::from(configuration_directory.join("base")).required(true))
-        .add_source(
-            config::File::from(configuration_directory.join(environment.as_str()))
-            .required(true),
-        )
-        .add_source(config::Environment::with_prefix("app").separator("__"))
-        .build()
-        .expect("Fallo al parsear el archivo de configuración.");
-
-        RwLock::new(settings)
-    };
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Settings {
-    pub application: ApplicationSettings,
-    pub search_engine: MeiliSettings,
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct ApplicationSettings {
-    #[serde(deserialize_with = "deserialize_number_from_string")]
     pub port: u16,
-    pub host: String,
-    pub cache: FeatureState,
+    pub host: IpAddr,
+    pub cache: Cache,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct MeiliSettings {
-    #[serde(deserialize_with = "deserialize_number_from_string")]
-    pub port: u16,
-    pub host: String,
-    // #[serde(deserialize_with = "as_f64")]
-    pub filter_threshold: f64,
-    pub master_key: Secret<String>,
-    pub settings: InnerSettings,
-    pub experimental_features: MeiliExperimentalFeatures,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct InnerSettings {
-    pagination: PaginationSetting,
-    embedders: Embedders,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct MeiliExperimentalFeatures {
-    pub vec_store: FeatureState,
-    pub metrics: FeatureState,
-    pub score_details: FeatureState,
-    pub logs_route: FeatureState,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub enum FeatureState {
-    Enabled,
-    Disabled,
-}
-
-#[derive(Serialize, Deserialize, Default, Debug, Clone)]
-struct PaginationSetting {
-    pub max_total_hits: usize,
-}
-
-#[derive(Deserialize, Debug, Clone)]
-struct Embedders {
-    source: String,
-    api_key: Secret<String>,
-    model: String,
-
-    document_template: Secret<String>,
-    dimensions: usize,
-}
-
-impl MeiliSettings {
-    /// # Errors
-    ///
-    /// Devolverá error si no es capaz de:
-    /// 1. Conectarse a la sesión de `MeiliSearch` utilizando el SDK.
-    /// 2. Actualizar la configuración del índice `tnea`.
-    ///
-    /// # Panics
-    ///
-    /// Entrará en pánico si no es capaz de:
-    /// 1. Conectarse a la sesión de `MeiliSearch` utilizando el SDK.
-    /// 2. Actualizar la configuración del índice `tnea`.
-    pub async fn connect_to_meili(&self) -> anyhow::Result<meilisearch_sdk::client::Client> {
-        let address = format!("http://{}:{}", self.host, self.port);
-
-        let meili_client =
-            meilisearch_sdk::client::Client::new(&address, Some(self.master_key.expose_secret()))
-                .expect("Fallo al iniciar un cliente con el servidor especificado.");
-
-        let json_settings = {
-            match self.experimental_features.vec_store {
-                FeatureState::Enabled => {
-                    let mut features = ExperimentalFeatures::new(&meili_client);
-                    features.set_vector_store(true).update().await?;
-                    json!(
-                    {
-                        "pagination": {
-                            "maxTotalHits": self.settings.pagination.max_total_hits
-                        },
-
-                        "embedders": {
-                            "default": {
-                                "source": self.settings.embedders.source,
-                                "apiKey": self.settings.embedders.api_key.expose_secret(),
-                                "model": self.settings.embedders.model,
-                                "documentTemplate": self.settings.embedders.document_template.expose_secret(),
-                                "dimensions": self.settings.embedders.dimensions
-                            }
-                        }
-                    })
-                }
-                FeatureState::Disabled => {
-                    let mut features = ExperimentalFeatures::new(&meili_client);
-                    features.set_vector_store(false).update().await?;
-                    json!(
-                    {
-                        "pagination": {
-                            "maxTotalHits": self.settings.pagination.max_total_hits
-                        },
-                    })
-                }
-            }
-        };
-
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .build()?;
-
-        let response = client
-            .patch(format!("{address}/indexes/tnea/settings"))
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.master_key.expose_secret()),
-            )
-            .header("Content-Type", "application/json")
-            .json(&json_settings)
-            .send()
-            .await
-            .expect("Fallo al enviar el http request hacia el servidor para configurar el índice `tnea`");
-
-        assert_eq!(response.status().as_u16(), 202);
-        tracing::info!("El índice 'tnea' se ha configurado exitosamente!");
-
-        Ok(meili_client)
-    }
-}
-
-/// # Errors
-///
-/// Devolverá error si no es capaz de:
-/// 1. Determinar el directorio actual.
-/// 2. Parsear un `APP_ENVIRONMENT` válido.
-/// 3. Parsear correctamente el archivo de configuración `.yml`.
-/// 4. Deserializar el archivo de configuracion en `Settings`
-///
-/// # Panics
-///
-/// Entrará en pánico si no es capaz de
-/// 1. Determinar el directorio actual.
-/// 2. Parsear un `APP_ENVIRONMENT` válido.
-/// 3. Parsear correctamente el archivo de configuración `.yml`.
-/// 4. Deserializar el archivo de configuracion en `Settings`
-pub fn from_configuration() -> Result<Settings, config::ConfigError> {
-    let settings: Settings = SETTINGS
-        .read()
-        .expect("Fallo al leer RwLock<Config>")
-        .clone()
-        .try_deserialize()
-        .expect("Fallo al deserializar la configuración en la struct Settings");
-
-    std::thread::spawn(|| {
-        let (tx, _rx) = channel();
-
-        let mut watcher: RecommendedWatcher = Watcher::new(
-            tx,
-            notify::Config::default().with_poll_interval(Duration::from_secs(2)),
-        )
-        .unwrap();
-
-        watcher
-            .watch(Path::new("configuration"), RecursiveMode::Recursive)
-            .unwrap();
-
-        // loop {
-        //     match rx.recv() {
-        //         Ok(Ok(Event {
-        //             kind: notify::event::EventKind::Modify(_),
-        //             ..
-        //         })) => {
-        //             println!(" * Settings.toml written; refreshing configuration ...");
-        //             SETTINGS.write().unwrap().refresh().unwrap();
-        //             show();
-        //         }
-
-        //         Err(e) => println!("watch error: {:?}", e),
-
-        //         _ => {
-        //             // Ignore event
-        //         }
-        //     }
-        // }
-    });
-
-    Ok(settings)
-}
-
-pub enum Environment {
-    Local,
-    Production,
-}
-
-impl Environment {
+impl ApplicationSettings {
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Environment::Local => "local",
-            Environment::Production => "production",
-        }
+    pub fn new(port: u16, host: IpAddr, cache: Cache) -> Self {
+        Self { port, host, cache }
     }
 }
 
-impl TryFrom<String> for Environment {
-    type Error = String;
+#[derive(Debug, Clone)]
+pub struct Template {
+    pub template: String,
+    pub fields: Vec<String>,
+}
+
+impl TryFrom<String> for Template {
+    type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        match value.to_lowercase().as_str() {
-            "local" => Ok(Self::Local),
-            "production" => Ok(Self::Production),
-            other => Err(format!(
-                "{other} No es un ambiente soportado, usa 'local' o 'production'",
-            )),
+        if value.is_empty() {
+            return Err(anyhow::anyhow!("Un template no puede ser un string vacío",));
         }
+
+        let mut start = 0;
+        let separator = "{{";
+        let separator_len = separator.len();
+        let mut fields = Vec::new();
+        let mut sql_template = String::new();
+
+        while let Some(open_idx) = value[start..].find("{{") {
+            if let Some(close_idx) = value[start + open_idx..].find("}}") {
+                let field = &value[start + open_idx + separator_len..start + open_idx + close_idx];
+                fields.push(field.trim().to_string());
+
+                let label = &value[start..start + open_idx].trim();
+
+                if !sql_template.is_empty() {
+                    sql_template.push(' ');
+                }
+                sql_template.push_str(&format!("' {} ' || {} ||", label, field.trim()));
+
+                start += open_idx + close_idx + separator_len;
+            } else {
+                return Err(anyhow::anyhow!("El template está mal conformado"));
+            }
+        }
+
+        if sql_template.ends_with("||") {
+            sql_template.truncate(sql_template.len() - 3);
+        }
+
+        if start < value.len() {
+            let remaining_text = &value[start..].trim();
+            if !remaining_text.is_empty() {
+                if !sql_template.is_empty() {
+                    sql_template.push(' ');
+                }
+                sql_template.push_str(remaining_text);
+            }
+        }
+
+        Ok(Self {
+            template: sql_template,
+            fields,
+        })
     }
 }

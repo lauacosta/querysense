@@ -1,12 +1,11 @@
 serve:
-    sqlx database create
-    sqlx migrate run
-    docker compose up
+    cargo run --quiet --release -- serve
 
-build:
-    docker compose up --build
+sync:
+    cargo run --quiet --release -- sync 
 
-build_client:
-    #!/usr/bin/env bash
-    set -euxo pipefail
-    cd ./cliente/ && pnpm build && mv dist/ ../
+embed input:
+    cargo run --release -- embed --model open-ai --input {{ input }}
+    
+clippy:
+    cargo clippy -- -Aclippy::pedantic

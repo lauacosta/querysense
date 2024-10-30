@@ -1,33 +1,30 @@
+use axum::handler::HandlerWithoutStateExt;
+use std::net::IpAddr;
+use std::sync::Arc;
+
 use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::SqlitePool;
 use tokio::signal;
+use tokio::sync::Mutex;
 use tower::ServiceBuilder;
-use tower_http::{
-    services::{ServeDir, ServeFile},
-    trace::{DefaultOnResponse, TraceLayer},
-};
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tower_request_id::{RequestId, RequestIdLayer};
 use tracing::{error_span, Level};
 
-use crate::configuration::FeatureState;
-use crate::{
-    configuration::Settings,
-    routes::{get_from_db, health_check, search},
-};
+use crate::cli::Cache;
+use crate::configuration::{self, ApplicationSettings};
+use crate::routes;
+use crate::sqlite::init_sqlite;
+
+#[derive(Debug, Clone)]
+pub struct AppState {
+    pub db: Arc<Mutex<rusqlite::Connection>>,
+    pub cache: Cache,
+}
 
 pub struct Application {
     pub port: u16,
-    pub host: String,
+    pub host: IpAddr,
     pub server: Serve<Router, Router>,
-}
-
-#[derive(Clone)]
-pub struct AppState {
-    pub search_client: meilisearch_sdk::client::Client,
-    pub db: SqlitePool,
-    pub ranking_score_threshold: f64,
-    pub cache: FeatureState,
 }
 
 impl Application {
@@ -38,38 +35,38 @@ impl Application {
     /// Entrará en panicos si no es capaz de:
     /// 1. Vincular un `tokio::net::TcpListener` a la dirección dada.
     /// 2. Falla en conectarse con el servidor de `MeiliSearch`.
-    pub async fn build(configuration: Settings) -> anyhow::Result<Self> {
-        let address = format!(
-            "{}:{}",
-            configuration.application.host, configuration.application.port
-        );
-        let listener = tokio::net::TcpListener::bind(address)
-            .await
-            .expect("Fallo al vincularse a la dirección");
+    #[tracing::instrument(name = "Construyendo la aplicación.", skip(configuration))]
+    pub async fn build(configuration: ApplicationSettings) -> anyhow::Result<Self> {
+        let address = format!("{}:{}", configuration.host, configuration.port);
 
-        let port = listener.local_addr()?.port();
-        let host = configuration.application.host;
-        let ranking_score_threshold = configuration.search_engine.filter_threshold;
-        let cache = configuration.application.cache;
-
-        let search_client = configuration
-            .search_engine
-            .connect_to_meili()
-            .await
-            .expect("Fallo en conectarse con el servidor de MeiliSearch, es probable que la sesión no haya sido iniciada");
-
-        let db = SqlitePoolOptions::new().connect_lazy_with(
-            SqliteConnectOptions::new()
-                .filename("./tnea_gestion.db")
-                .create_if_missing(true),
-        );
-
-        let state = AppState {
-            search_client,
-            db,
-            ranking_score_threshold,
-            cache,
+        tracing::debug!("Definiendo la direccion HTTP...");
+        let listener = match tokio::net::TcpListener::bind(&address).await {
+            Ok(listener) => listener,
+            Err(err) => {
+                tracing::error!("{err}. Tratando con otro puerto...");
+                match tokio::net::TcpListener::bind(format!("{}:0", configuration.host)).await {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        tracing::error!("No hay puertos disponibles, finalizando la aplicación...");
+                        return Err(err.into());
+                    }
+                }
+            }
         };
+
+        let port = listener
+            .local_addr()
+            .expect("Fallo al encontrar la local address")
+            .port();
+
+        let host = configuration.host;
+
+        tracing::debug!("Definiendo la direccion HTTP listo!");
+
+        let db = Arc::new(Mutex::new(init_sqlite()?));
+        let cache = configuration.cache;
+
+        let state = AppState { db, cache };
 
         let server = build_server(listener, state);
 
@@ -81,7 +78,7 @@ impl Application {
     }
 
     pub fn host(&self) -> String {
-        self.host.clone()
+        self.host.to_string()
     }
 
     /// # Errors
@@ -90,10 +87,10 @@ impl Application {
     /// # Panics
     ///
     /// Entrará en pánico si no es capaz de instalar el handler requerido.
-    pub async fn run_until_stopped(self) -> Result<(), std::io::Error> {
+    pub async fn run_until_stopped(self) -> std::io::Result<()> {
         self.server
             // https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
-            .with_graceful_shutdown(async {
+            .with_graceful_shutdown(async move {
                 let ctrl_c = async {
                     signal::ctrl_c()
                         .await
@@ -111,8 +108,10 @@ impl Application {
                 let terminate = std::future::pending::<()>();
 
                 tokio::select! {
-                    () = ctrl_c => {},
-                    () = terminate => {},
+                    () = ctrl_c => {
+                    },
+                    () = terminate => {
+                    },
                 }
             })
             .await
@@ -120,19 +119,13 @@ impl Application {
 }
 
 pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve<Router, Router> {
-    // let cors = CorsLayer::new()
-    //     .allow_origin(Any)
-    //     .allow_methods(Any)
-    //     .allow_headers(Any);
-
     let server = Router::new()
-        .route("/health_check", get(health_check))
-        .route("/search", get(search))
-        .route("/historial", get(get_from_db))
-        .nest_service(
-            "/",
-            ServeDir::new("./dist").not_found_service(ServeFile::new("./fallout.html")),
-        )
+        .route("/", get(routes::index))
+        .route("/health", get(routes::health_check))
+        .route("/search", get(routes::search))
+        .route("/historial", get(routes::get_from_db))
+        .route("/_assets/*path", get(routes::handle_assets))
+        .fallback_service(routes::fallback.into_service())
         .with_state(state)
         .layer(
             ServiceBuilder::new()
@@ -159,7 +152,28 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
                 )
                 .layer(RequestIdLayer),
         );
-    // .layer(cors);
 
     axum::serve(listener, server)
+}
+
+pub async fn run_server(configuration: configuration::ApplicationSettings) -> anyhow::Result<()> {
+    tracing::info!("Iniciando el servidor...");
+    match Application::build(configuration).await {
+        Ok(app) => {
+            tracing::info!(
+                "La aplicación está disponible en http://{}:{}.",
+                app.host(),
+                app.port()
+            );
+            if let Err(e) = app.run_until_stopped().await {
+                tracing::error!("Error ejecutando el servidor HTTP: {:?}", e);
+                return Err(e.into());
+            }
+        }
+        Err(e) => {
+            tracing::error!("Fallo al iniciar el servidor: {:?}", e);
+            return Err(e);
+        }
+    }
+    Ok(())
 }
