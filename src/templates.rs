@@ -1,4 +1,8 @@
+use std::fmt::Display;
+
 use askama_axum::{IntoResponse, Template};
+use rusqlite::types::{FromSql, FromSqlError, ValueRef};
+use serde::Deserialize;
 
 pub enum DisplayableContent {
     Common(Table),
@@ -58,8 +62,8 @@ pub enum TableData {
 #[derive(Debug, Clone, Default)]
 pub struct TneaDisplay {
     email: String,
-    edad: usize,
-    sexo: String,
+    pub edad: u64,
+    pub sexo: Sexo,
     template: String,
     pub score: f32,
     match_type: String,
@@ -69,8 +73,8 @@ impl TneaDisplay {
     #[must_use]
     pub fn new(
         email: String,
-        edad: usize,
-        sexo: String,
+        edad: u64,
+        sexo: Sexo,
         template: String,
         score: f32,
         match_type: String,
@@ -90,8 +94,8 @@ impl TneaDisplay {
 pub struct ReRankDisplay {
     template: String,
     email: String,
-    edad: usize,
-    sexo: String,
+    pub edad: u64,
+    pub sexo: Sexo,
     fts_rank: i64,
     vec_rank: i64,
     pub combined_rank: f32,
@@ -104,8 +108,8 @@ impl ReRankDisplay {
     pub fn new(
         template: String,
         email: String,
-        edad: usize,
-        sexo: String,
+        edad: u64,
+        sexo: Sexo,
         fts_rank: i64,
         vec_rank: i64,
         combined_rank: f32,
@@ -123,5 +127,38 @@ impl ReRankDisplay {
             vec_score,
             fts_score,
         }
+    }
+}
+
+// El dataset solamente distingue entre estos dos.
+#[derive(Deserialize, Debug, Clone, Default, PartialEq)]
+pub enum Sexo {
+    #[default]
+    U,
+    F,
+    M,
+}
+
+impl FromSql for Sexo {
+    fn column_result(value: ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        match value {
+            ValueRef::Text(text) => match text {
+                b"F" => Ok(Sexo::F),
+                b"M" => Ok(Sexo::M),
+                _ => Ok(Sexo::U),
+            },
+            _ => Err(FromSqlError::InvalidType),
+        }
+    }
+}
+
+impl Display for Sexo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let content = match self {
+            Sexo::U => "No definido",
+            Sexo::F => "F",
+            Sexo::M => "M",
+        };
+        write!(f, "{}", content)
     }
 }

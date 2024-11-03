@@ -39,6 +39,7 @@ impl Historial {
     }
 }
 
+#[derive(Deserialize, Debug)]
 pub enum SearchStrategy {
     Fts,
     Semantic,

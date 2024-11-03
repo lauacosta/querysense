@@ -34,22 +34,17 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result
     tracing::info!("Generando embeddings...");
 
     let client = reqwest::Client::new();
-    let jh = templates
-        .chunks(chunk_size)
-        .into_iter()
-        .map(|chunk| match model {
-            #[cfg(feature = "local")]
-            cli::Model::Local => async { Err(anyhow!("Local model is unimplemented")) },
-            cli::Model::OpenAI => {
-                let indices: Vec<u64> = chunk.into_iter().map(|(id, _)| *id).collect();
-                let templates: Vec<String> = chunk
-                    .into_iter()
-                    .map(|(_, template)| template.clone())
-                    .collect();
+    let jh = templates.chunks(chunk_size).map(|chunk| match model {
+        #[cfg(feature = "local")]
+        cli::Model::Local => async { Err(anyhow!("Local model is unimplemented")) },
+        cli::Model::OpenAI => {
+            let indices: Vec<u64> = chunk.iter().map(|(id, _)| *id).collect();
+            let templates: Vec<String> =
+                chunk.iter().map(|(_, template)| template.clone()).collect();
 
-                openai::embed_vec(indices, templates, &client)
-            }
-        });
+            openai::embed_vec(indices, templates, &client)
+        }
+    });
 
     let stream = futures::stream::iter(jh);
 

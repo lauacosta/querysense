@@ -1,22 +1,26 @@
 {%- import "./componentes/form.html" as scope -%}
+{%- import "./componentes/historial.html" as cache -%}
 {% extends "base.html" %}
 
+{%block historial %}
+    {% call cache::historial("search") %}
+{% endblock %}
+
 {% block content %}
-    <div>
-        {% call scope::busqueda("search") %}
-    </div>
+    {% call scope::busqueda("search") %}
+
     <div class="table-header">
         <div class="result-count">{{ msg }}</div>
         <div class="pagination"></div> 
-        <button id="csv_trigger">Descargar CSV</button>
     </div>
 
-
     <div class="table-container">
-        <table class="content" id="table-content">
+        <table class="modern-table" id="table-content">
             <thead>
                 <tr>
-                    <th scope="col">Correo</th>
+                    <th scope="col">Correo
+                        <button id="csv_trigger" class="search-button">Descargar correos</button>
+                    </th>
                     <th scope="col">Edad</th>
                     <th scope="col">Sexo</th>
                     <th scope="col">Template</th>
@@ -30,7 +34,7 @@
             <tbody>
                 {% for row in table %}
                 <tr>
-                    <td> {{ row.email }} </td>
+                    <td class="csv"> {{ row.email }} </td>
                     <td> {{ row.edad }} </td>
                     <td> {{ row.sexo }} </td> 
                     <td> {{ row.template|safe }} </td> 
@@ -43,7 +47,7 @@
                 {% endfor %} 
             </tbody>
         </table>
-        <p style="color:green;"> <b>* Las palabras resaltadas en verde son los resultados encontrados usando FTS!</b> </p>
     </div>
+    <p style="color:green;"> <b>* Las palabras resaltadas en verde son los resultados encontrados usando FTS!</b> </p>
 {% endblock content %}
 

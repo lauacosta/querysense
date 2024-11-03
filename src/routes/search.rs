@@ -8,14 +8,16 @@ use crate::{
     openai,
     routes::SearchStrategy,
     startup::AppState,
-    templates::{DisplayableContent, ReRankDisplay, RrfTable, Table, TableData, TneaDisplay},
+    templates::{DisplayableContent, ReRankDisplay, RrfTable, Sexo, Table, TableData, TneaDisplay},
 };
 
 #[derive(Deserialize, Debug)]
 pub struct Params {
     query: String,
-    strategy: String,
-    // filtros: Option<Vec<String>>,
+    strategy: SearchStrategy,
+    sexo: Sexo,
+    edad_min: u64,
+    edad_max: u64,
 }
 
 #[axum::debug_handler]
@@ -32,15 +34,7 @@ pub async fn search(
     };
     let db = app.db.lock().await;
 
-    let strat = match SearchStrategy::try_from(params.strategy) {
-        Ok(strat) => strat,
-        Err(err) => {
-            tracing::warn!("{}", err);
-            return DisplayableContent::Common(Table::default());
-        }
-    };
-
-    let table = match strat {
+    let table = match params.strategy {
         SearchStrategy::Fts => {
             let mut statement = match db.prepare(
                 "select
@@ -62,11 +56,11 @@ pub async fn search(
                 }
             };
 
-            let rows = match statement.query_map(&[(":query", &params.query)], |row| {
-                let score: f32 = row.get(0).unwrap_or_default();
+            let mut rows = match statement.query_map(&[(":query", &params.query)], |row| {
+                let score = row.get::<_, f32>(0).unwrap_or_default() * -1.;
                 let email: String = row.get(1).unwrap_or_default();
-                let edad: usize = row.get(2).unwrap_or_default();
-                let sexo: String = row.get(3).unwrap_or_default();
+                let edad: u64 = row.get(2).unwrap_or_default();
+                let sexo: Sexo = row.get(3).unwrap_or_default();
                 let template: String = row.get(4).unwrap_or_default();
                 let match_type: String = row.get(5).unwrap_or_default();
 
@@ -81,6 +75,17 @@ pub async fn search(
                     return DisplayableContent::Common(Table::default());
                 }
             };
+
+            match params.sexo {
+                Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
+                Sexo::M => rows.retain(|x| {
+                    x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
+                }),
+                Sexo::F => rows.retain(|x| {
+                    x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
+                }),
+            };
+
             TableData::Standard(rows)
         }
         SearchStrategy::Semantic => {
@@ -114,10 +119,10 @@ pub async fn search(
 
             let mut rows =
                 match statement.query_map(&[(":embedding", query_emb.as_bytes())], |row| {
-                    let score: f32 = row.get(0).unwrap_or_default();
+                    let score = row.get::<_, f32>(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
-                    let edad: usize = row.get(2).unwrap_or_default();
-                    let sexo: String = row.get(3).unwrap_or_default();
+                    let edad: u64 = row.get(2).unwrap_or_default();
+                    let sexo: Sexo = row.get(3).unwrap_or_default();
                     let template: String = row.get(4).unwrap_or_default();
                     let match_type: String = row.get(5).unwrap_or_default();
 
@@ -134,6 +139,16 @@ pub async fn search(
                     }
                 };
             rows.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap());
+
+            match params.sexo {
+                Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
+                Sexo::M => rows.retain(|x| {
+                    x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
+                }),
+                Sexo::F => rows.retain(|x| {
+                    x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
+                }),
+            };
             TableData::Standard(rows)
         }
         SearchStrategy::HybridRrf => {
@@ -200,18 +215,18 @@ pub async fn search(
                 }
             };
 
-            let rows = match statement.query_map(
+            let mut rows = match statement.query_map(
                 rusqlite::named_params! { ":embedding": query_emb.as_bytes(), ":query": params.query, ":k": k, ":weight_fts":weight_fts, ":weight_vec":weight_vec ,":rrf_k":rrf_k },
                 |row| {
                     let template: String = row.get(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
-                    let edad: usize = row.get(2).unwrap_or_default();
-                    let sexo: String = row.get(3).unwrap_or_default();
+                    let edad: u64 = row.get(2).unwrap_or_default();
+                    let sexo: Sexo = row.get(3).unwrap_or_default();
                     let fts_rank: i64= row.get(4).unwrap_or_default();
                     let vec_rank: i64= row.get(5).unwrap_or_default();
                     let combined_rank: f32 = row.get(6).unwrap_or_default();
                     let vec_score: f32= row.get(7).unwrap_or_default();
-                    let fts_score: f32= row.get(8).unwrap_or_default();
+                    let fts_score = row.get::<_, f32>(8).unwrap_or_default() * -1.;
 
 
                     let data = ReRankDisplay::new(template,email, edad, sexo, fts_rank, vec_rank, combined_rank, vec_score, fts_score);
@@ -225,6 +240,15 @@ pub async fn search(
                     tracing::warn!("{}", err);
                     return DisplayableContent::RrfTable(RrfTable::default());
                 }
+            };
+            match params.sexo {
+                Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
+                Sexo::M => rows.retain(|x| {
+                    x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
+                }),
+                Sexo::F => rows.retain(|x| {
+                    x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
+                }),
             };
             TableData::Rrf(rows)
         }
@@ -286,13 +310,13 @@ pub async fn search(
                 }
             };
 
-            let rows = match statement.query_map(
+            let mut rows = match statement.query_map(
                 rusqlite::named_params! { ":embedding": query_emb.as_bytes(), ":query": params.query, ":k": k},
                 |row| {
                     let template: String = row.get(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
-                    let edad: usize = row.get(2).unwrap_or_default();
-                    let sexo: String = row.get(3).unwrap_or_default();
+                    let edad: u64 = row.get(2).unwrap_or_default();
+                    let sexo: Sexo= row.get(3).unwrap_or_default();
                     let score: f32 = row.get(4).unwrap_or_default();
                     let match_type: String = row.get(5).unwrap_or_default();
 
@@ -307,6 +331,15 @@ pub async fn search(
                     tracing::warn!("{}", err);
                         return DisplayableContent::Common(Table::default());
                 }
+            };
+            match params.sexo {
+                Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
+                Sexo::M => rows.retain(|x| {
+                    x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
+                }),
+                Sexo::F => rows.retain(|x| {
+                    x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
+                }),
             };
             TableData::Standard(rows)
         }
@@ -361,14 +394,14 @@ pub async fn search(
                 }
             };
 
-            let rows = match statement.query_map(
+            let mut rows = match statement.query_map(
                 rusqlite::named_params! { ":embedding": query_emb.as_bytes(), ":query": params.query, ":k": k},
                 |row| {
                     let template: String = row.get(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
-                    let edad: usize = row.get(2).unwrap_or_default();
-                    let sexo: String = row.get(3).unwrap_or_default();
-                    let score: f32 = row.get(4).unwrap_or_default();
+                    let edad: u64= row.get(2).unwrap_or_default();
+                    let sexo:Sexo = row.get(3).unwrap_or_default();
+                let score = row.get::<_, f32>(4).unwrap_or_default() * -1.;
                     let match_type: String = row.get(5).unwrap_or_default();
 
                     let data = TneaDisplay::new(email, edad, sexo, template, score, match_type);
@@ -383,6 +416,16 @@ pub async fn search(
                         return DisplayableContent::Common(Table::default());
                 }
             };
+            match params.sexo {
+                Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
+                Sexo::M => rows.retain(|x| {
+                    x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
+                }),
+                Sexo::F => rows.retain(|x| {
+                    x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
+                }),
+            };
+
             TableData::Standard(rows)
         }
     };
