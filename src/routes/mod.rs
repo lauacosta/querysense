@@ -5,10 +5,12 @@ mod historial;
 mod index;
 mod search;
 
+use askama_axum::{IntoResponse, Response};
 pub use assets::*;
 pub use fallback::*;
 pub use health_check::*;
 pub use historial::*;
+use http::StatusCode;
 pub use index::*;
 pub use search::*;
 
@@ -62,5 +64,23 @@ impl TryFrom<String> for SearchStrategy {
                 "{other} No es una estrategia de búsqueda soportada, usa 'fts', 'semantic_search', 'HKF' o 'rrf'",
             )),
         }
+    }
+}
+
+pub struct ReportError(eyre::Report);
+
+impl From<eyre::Report> for ReportError {
+    fn from(err: eyre::Report) -> Self {
+        ReportError(err)
+    }
+}
+
+impl IntoResponse for ReportError {
+    fn into_response(self) -> Response {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Internal server error: {:?}", self.0),
+        )
+            .into_response()
     }
 }

@@ -1,14 +1,14 @@
-use crate::cli::Cache;
-use crate::routes::Historial;
-use crate::startup::AppState;
-use axum::http::StatusCode;
-use axum::{extract::State, Json};
-use chrono::NaiveDateTime;
+// use crate::cli::Cache;
+// use crate::routes::Historial;
+// use crate::startup::AppState;
+// use axum::http::StatusCode;
+// use axum::{extract::State, Json};
 
 #[axum::debug_handler]
-pub async fn get_from_db(
-    State(AppState { db, cache, .. }): State<AppState>,
-) -> (StatusCode, Json<Vec<Historial>>) {
+pub async fn get_from_db(// State(AppState { db, cache, .. }): State<AppState>,
+)
+// -> (StatusCode, Json<Vec<Historial>>)
+{
     todo!()
     // match cache {
     //     Cache::Enabled => {

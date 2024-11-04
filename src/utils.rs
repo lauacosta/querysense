@@ -46,7 +46,7 @@ impl RegistroSQLITE for TneaData {}
 pub fn parse_and_embed(
     path: impl AsRef<Path> + std::fmt::Display,
     template: &configuration::Template,
-) -> anyhow::Result<Vec<TneaData>> {
+) -> eyre::Result<Vec<TneaData>> {
     let mut datasources = Vec::new();
 
     tracing::info!("Escaneando los archivos .csv disponibles...");
@@ -81,7 +81,7 @@ pub fn parse_and_embed(
 
         for field in &template.fields {
             if !headers.contains(field) {
-                return Err(anyhow::anyhow!(
+                return Err(eyre::eyre!(
                     "El archivo {}{} no tiene el header {}.",
                     path,
                     source,
@@ -93,7 +93,7 @@ pub fn parse_and_embed(
         let data = reader
                 .deserialize()
                 .collect::<Result<Vec<TneaData>, csv::Error>>()
-                .map_err(|err| anyhow::anyhow!("{source} no pudo se deserializado. Hay que controlar que tenga los headers correctos. Err: {err}"))?;
+                .map_err(|err| eyre::eyre!("{source} no pudo se deserializado. Hay que controlar que tenga los headers correctos. Err: {err}"))?;
 
         result.extend(data);
 

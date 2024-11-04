@@ -23,11 +23,11 @@ pub struct Template {
 }
 
 impl TryFrom<String> for Template {
-    type Error = anyhow::Error;
+    type Error = eyre::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         if value.is_empty() {
-            return Err(anyhow::anyhow!("Un template no puede ser un string vacío",));
+            return Err(eyre::eyre!("Un template no puede ser un string vacío",));
         }
 
         let mut start = 0;
@@ -50,7 +50,7 @@ impl TryFrom<String> for Template {
 
                 start += open_idx + close_idx + separator_len;
             } else {
-                return Err(anyhow::anyhow!("El template está mal conformado"));
+                return Err(eyre::eyre!("El template está mal conformado"));
             }
         }
 

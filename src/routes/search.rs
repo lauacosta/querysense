@@ -1,4 +1,7 @@
-use axum::extract::{Query, State};
+use axum::{
+    extract::{Query, State},
+    Extension,
+};
 use serde::Deserialize;
 use tracing::instrument;
 use zerocopy::IntoBytes;
@@ -6,7 +9,7 @@ use zerocopy::IntoBytes;
 use crate::{
     cli::Cache,
     openai,
-    routes::SearchStrategy,
+    routes::{ReportError, SearchStrategy},
     startup::AppState,
     templates::{DisplayableContent, ReRankDisplay, RrfTable, Sexo, Table, TableData, TneaDisplay},
 };
@@ -25,7 +28,8 @@ pub struct Params {
 pub async fn search(
     Query(params): Query<Params>,
     State(app): State<AppState>,
-) -> DisplayableContent {
+    client: Extension<reqwest::Client>,
+) -> eyre::Result<DisplayableContent, ReportError> {
     match app.cache {
         Cache::Enabled => {
             todo!();
@@ -51,8 +55,8 @@ pub async fn search(
             ) {
                 Ok(stmt) => stmt,
                 Err(err) => {
-                    tracing::warn!("{}", err);
-                    return DisplayableContent::Common(Table::default());
+                    tracing::error!("{}", err);
+                    return Err(ReportError(err.into()));
                 }
             };
 
@@ -71,8 +75,8 @@ pub async fn search(
                     .collect::<Result<Vec<TneaDisplay>, _>>()
                     .unwrap_or_default(),
                 Err(err) => {
-                    tracing::warn!("{}", err);
-                    return DisplayableContent::Common(Table::default());
+                    tracing::error!("{}", err);
+                    return Err(ReportError(err.into()));
                 }
             };
 
@@ -89,7 +93,6 @@ pub async fn search(
             TableData::Standard(rows)
         }
         SearchStrategy::Semantic => {
-            let client = reqwest::Client::new();
             let query_emb = openai::embed_single(params.query.clone(), &client)
                 .await
                 .map_err(|err| tracing::error!("{err}"))
@@ -112,8 +115,8 @@ pub async fn search(
             ) {
                 Ok(stmt) => stmt,
                 Err(err) => {
-                    tracing::warn!("{}", err);
-                    return DisplayableContent::Common(Table::default());
+                    tracing::error!("{}", err);
+                    return Err(ReportError(err.into()));
                 }
             };
 
@@ -134,8 +137,8 @@ pub async fn search(
                         .collect::<Result<Vec<TneaDisplay>, _>>()
                         .unwrap_or_default(),
                     Err(err) => {
-                        tracing::warn!("{}", err);
-                        return DisplayableContent::Common(Table::default());
+                        tracing::error!("{}", err);
+                        return Err(ReportError(err.into()));
                     }
                 };
             rows.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap());
@@ -152,7 +155,6 @@ pub async fn search(
             TableData::Standard(rows)
         }
         SearchStrategy::HybridRrf => {
-            let client = reqwest::Client::new();
             let query_emb = openai::embed_single(params.query.clone(), &client)
                 .await
                 .map_err(|err| tracing::error!("{err}"))
@@ -210,8 +212,8 @@ pub async fn search(
             ) {
                 Ok(stmt) => stmt,
                 Err(err) => {
-                    tracing::warn!("{}", err);
-                    return DisplayableContent::RrfTable(RrfTable::default());
+                    tracing::error!("{}", err);
+                    return Err(ReportError(err.into()));
                 }
             };
 
@@ -237,8 +239,9 @@ pub async fn search(
                     .collect::<Result<Vec<ReRankDisplay>, _>>()
                     .unwrap_or_default(),
                 Err(err) => {
-                    tracing::warn!("{}", err);
-                    return DisplayableContent::RrfTable(RrfTable::default());
+                    tracing::error!("{}", err);
+                    return Err(ReportError(err.into()));
+
                 }
             };
             match params.sexo {
@@ -253,7 +256,6 @@ pub async fn search(
             TableData::Rrf(rows)
         }
         SearchStrategy::HybridKf => {
-            let client = reqwest::Client::new();
             let query_emb = openai::embed_single(params.query.clone(), &client)
                 .await
                 .map_err(|err| tracing::error!("{err}"))
@@ -305,8 +307,8 @@ pub async fn search(
             ) {
                 Ok(stmt) => stmt,
                 Err(err) => {
-                    tracing::warn!("{}", err);
-                    return DisplayableContent::Common(Table::default());
+                    tracing::error!("{}", err);
+                    return Err(ReportError(err.into()));
                 }
             };
 
@@ -328,8 +330,8 @@ pub async fn search(
                     .collect::<Result<Vec<TneaDisplay>, _>>()
                     .unwrap_or_default(),
                 Err(err) => {
-                    tracing::warn!("{}", err);
-                        return DisplayableContent::Common(Table::default());
+                    tracing::error!("{}", err);
+                    return Err(ReportError(err.into()));
                 }
             };
             match params.sexo {
@@ -344,7 +346,6 @@ pub async fn search(
             TableData::Standard(rows)
         }
         SearchStrategy::HybridReRank => {
-            let client = reqwest::Client::new();
             let query_emb = openai::embed_single(params.query.clone(), &client)
                 .await
                 .map_err(|err| tracing::error!("{err}"))
@@ -389,8 +390,8 @@ pub async fn search(
             ) {
                 Ok(stmt) => stmt,
                 Err(err) => {
-                    tracing::warn!("{}", err);
-                    return DisplayableContent::Common(Table::default());
+                    tracing::error!("{}", err);
+                    return Err(ReportError(err.into()));
                 }
             };
 
@@ -412,8 +413,8 @@ pub async fn search(
                     .collect::<Result<Vec<TneaDisplay>, _>>()
                     .unwrap_or_default(),
                 Err(err) => {
-                    tracing::warn!("{}", err);
-                        return DisplayableContent::Common(Table::default());
+                    tracing::error!("{}", err);
+                    return Err(ReportError(err.into()));
                 }
             };
             match params.sexo {
@@ -441,10 +442,10 @@ pub async fn search(
                 -1.0
             );
 
-            DisplayableContent::Common(Table {
+            Ok(DisplayableContent::Common(Table {
                 msg: format!("Hay un total de {} resultados.", vec.len()),
                 table: vec,
-            })
+            }))
         }
         TableData::Rrf(vec) => {
             tracing::info!(
@@ -456,10 +457,10 @@ pub async fn search(
                 -1.0
             );
 
-            DisplayableContent::RrfTable(RrfTable {
+            Ok(DisplayableContent::RrfTable(RrfTable {
                 msg: format!("Hay un total de {} resultados.", vec.len()),
                 table: vec,
-            })
+            }))
         }
     }
 }

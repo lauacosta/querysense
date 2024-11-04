@@ -1,6 +1,8 @@
 use axum::handler::HandlerWithoutStateExt;
+use axum::Extension;
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
 use tokio::signal;
@@ -8,7 +10,7 @@ use tokio::sync::Mutex;
 use tower::ServiceBuilder;
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tower_request_id::{RequestId, RequestIdLayer};
-use tracing::{error_span, Level};
+use tracing::{error_span, instrument, Level};
 
 use crate::cli::Cache;
 use crate::configuration::{self, ApplicationSettings};
@@ -21,6 +23,7 @@ pub struct AppState {
     pub cache: Cache,
 }
 
+#[derive(Debug)]
 pub struct Application {
     pub port: u16,
     pub host: IpAddr,
@@ -36,10 +39,9 @@ impl Application {
     /// 1. Vincular un `tokio::net::TcpListener` a la dirección dada.
     /// 2. Falla en conectarse con el servidor de `MeiliSearch`.
     #[tracing::instrument(name = "Construyendo la aplicación.", skip(configuration))]
-    pub async fn build(configuration: ApplicationSettings) -> anyhow::Result<Self> {
+    pub async fn build(configuration: ApplicationSettings) -> eyre::Result<Self> {
         let address = format!("{}:{}", configuration.host, configuration.port);
 
-        tracing::debug!("Definiendo la direccion HTTP...");
         let listener = match tokio::net::TcpListener::bind(&address).await {
             Ok(listener) => listener,
             Err(err) => {
@@ -61,14 +63,12 @@ impl Application {
 
         let host = configuration.host;
 
-        tracing::debug!("Definiendo la direccion HTTP listo!");
-
         let db = Arc::new(Mutex::new(init_sqlite()?));
         let cache = configuration.cache;
 
         let state = AppState { db, cache };
 
-        let server = build_server(listener, state);
+        let server = build_server(listener, state)?;
 
         Ok(Self { port, host, server })
     }
@@ -87,6 +87,7 @@ impl Application {
     /// # Panics
     ///
     /// Entrará en pánico si no es capaz de instalar el handler requerido.
+    #[tracing::instrument(skip(self))]
     pub async fn run_until_stopped(self) -> std::io::Result<()> {
         self.server
             // https://github.com/tokio-rs/axum/blob/main/examples/graceful-shutdown/src/main.rs
@@ -118,7 +119,10 @@ impl Application {
     }
 }
 
-pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve<Router, Router> {
+pub fn build_server(
+    listener: tokio::net::TcpListener,
+    state: AppState,
+) -> eyre::Result<Serve<Router, Router>> {
     let server = Router::new()
         .route("/", get(routes::index))
         .route("/health", get(routes::health_check))
@@ -127,6 +131,11 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
         .route("/_assets/*path", get(routes::handle_assets))
         .fallback_service(routes::fallback.into_service())
         .with_state(state)
+        .layer(Extension(
+            reqwest::ClientBuilder::new()
+                .timeout(Duration::from_secs(5))
+                .build()?,
+        ))
         .layer(
             ServiceBuilder::new()
                 .layer(
@@ -153,11 +162,11 @@ pub fn build_server(listener: tokio::net::TcpListener, state: AppState) -> Serve
                 .layer(RequestIdLayer),
         );
 
-    axum::serve(listener, server)
+    Ok(axum::serve(listener, server))
 }
 
-pub async fn run_server(configuration: configuration::ApplicationSettings) -> anyhow::Result<()> {
-    tracing::info!("Iniciando el servidor...");
+#[instrument(skip(configuration))]
+pub async fn run_server(configuration: configuration::ApplicationSettings) -> eyre::Result<()> {
     match Application::build(configuration).await {
         Ok(app) => {
             tracing::info!(
