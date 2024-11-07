@@ -1,0 +1,16 @@
+{
+    "name": "querysense",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "vite build",
+        "watch": "vite build --watch"
+    },
+    "devDependencies": {
+        "autoprefixer": "^10.4.16",
+        "cssnano": "^6.0.2",
+        "postcss": "^8.4.32",
+        "terser": "^5.26.0",
+        "vite": "^5.0.10"
+    }
+}
