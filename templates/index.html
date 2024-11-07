@@ -9,7 +9,7 @@
 {% block content %}
     <div class="middle">
         <div class="search-container">
-        <h2>Querysense</h2>
+        <h1>Querysense</h1>
         <form action="/search" method="GET">
             <div class="search-group">
                 <label for="search">Búsqueda:</label>
@@ -48,6 +48,21 @@
                     <input type="number" id="age_min" name="edad_min" min="18" max="100" value="18" placeholder="Mínimo">
                     <input type="number" id="age_max" name="edad_max" min="18" max="100" value="100" placeholder="Máximo">
                 </div>
+            </div>
+
+            <div class="search-group">
+                <label for="balanceSlider">Pesos:</label>
+                <input type="range" id="balanceSlider" min="0" max="100" value="50">
+                <p>Peso FTS: <span id="value1Display" class="slider-value">50</span></p>
+                <p>Peso Semantic: <span id="value2Display" class="slider-value">50</span></p>
+                <div class="tooltip">
+                    Esto solo tiene efecto si el metodo de búsqueda es Reciprocal Rank Fusion!
+                </div>
+            </div>
+
+            <div class="search-group">
+                <input type="hidden" id="hiddenValue1" name="peso_fts" value="50">
+                <input type="hidden" id="hiddenValue2" name="peso_semantic" value="50">
             </div>
             
             <button type="submit" class='search-button'>Búsqueda</button>

@@ -1,4 +1,5 @@
 serve:
+    bun vite build
     cargo run --quiet --release -- serve
 
 sync:

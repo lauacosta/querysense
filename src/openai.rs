@@ -1,5 +1,3 @@
-use std::iter::zip;
-
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -77,7 +75,7 @@ pub async fn embed_vec(
     );
 
     let start = std::time::Instant::now();
-    let embedding = zip(
+    let embedding = std::iter::zip(
         indices,
         EmbeddingObject::embeddings_iter(response.embeddings),
     )
@@ -95,7 +93,6 @@ pub async fn embed_vec(
 
     Ok(embedding)
 }
-
 #[instrument(name = "Generando embedding del query", skip(input, client))]
 pub async fn embed_single(input: String, client: &reqwest::Client) -> eyre::Result<Vec<f32>> {
     let global_start = std::time::Instant::now();

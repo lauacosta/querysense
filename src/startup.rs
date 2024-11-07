@@ -160,7 +160,8 @@ pub fn build_server(
                         ),
                 )
                 .layer(RequestIdLayer),
-        );
+        )
+        .layer(tower_http::compression::CompressionLayer::new());
 
     Ok(axum::serve(listener, server))
 }

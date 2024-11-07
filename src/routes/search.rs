@@ -21,10 +21,13 @@ pub struct Params {
     sexo: Sexo,
     edad_min: u64,
     edad_max: u64,
+
+    peso_fts: f32,
+    peso_semantic: f32,
 }
 
 #[axum::debug_handler]
-#[instrument(name = "Realizando la búsqueda", skip(app))]
+#[instrument(name = "Realizando la búsqueda", skip(app, client))]
 pub async fn search(
     Query(params): Query<Params>,
     State(app): State<AppState>,
@@ -141,7 +144,6 @@ pub async fn search(
                         return Err(ReportError(err.into()));
                     }
                 };
-            rows.sort_by(|a, b| a.score.partial_cmp(&b.score).unwrap());
 
             match params.sexo {
                 Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
@@ -160,9 +162,11 @@ pub async fn search(
                 .map_err(|err| tracing::error!("{err}"))
                 .expect("Fallo al crear un embedding del query");
 
-            let k: i64 = 1000;
-            let weight_vec: f32 = 1.0;
-            let weight_fts: f32 = 1.0;
+            let k: i64 = 1_000;
+
+            // Normalizo los datos que estan en un rango de 0 a 100 para que esten de 0 a 1.
+            let weight_vec = params.peso_semantic / 100.0;
+            let weight_fts: f32 = params.peso_fts / 100.0;
             let rrf_k: i64 = 60;
 
             let mut statement = match db.prepare(
@@ -224,8 +228,8 @@ pub async fn search(
                     let email: String = row.get(1).unwrap_or_default();
                     let edad: u64 = row.get(2).unwrap_or_default();
                     let sexo: Sexo = row.get(3).unwrap_or_default();
-                    let fts_rank: i64= row.get(4).unwrap_or_default();
-                    let vec_rank: i64= row.get(5).unwrap_or_default();
+                    let vec_rank: i64= row.get(4).unwrap_or_default();
+                    let fts_rank: i64= row.get(5).unwrap_or_default();
                     let combined_rank: f32 = row.get(6).unwrap_or_default();
                     let vec_score: f32= row.get(7).unwrap_or_default();
                     let fts_score = row.get::<_, f32>(8).unwrap_or_default() * -1.;
