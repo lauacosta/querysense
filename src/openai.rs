@@ -1,5 +1,3 @@
-use std::iter::zip;
-
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -44,7 +42,7 @@ pub async fn embed_vec(
     indices: Vec<u64>,
     input: Vec<String>,
     client: &reqwest::Client,
-) -> anyhow::Result<Vec<(u64, Vec<f32>)>> {
+) -> eyre::Result<Vec<(u64, Vec<f32>)>> {
     let global_start = std::time::Instant::now();
 
     let request = RequestBody {
@@ -77,7 +75,7 @@ pub async fn embed_vec(
     );
 
     let start = std::time::Instant::now();
-    let embedding = zip(
+    let embedding = std::iter::zip(
         indices,
         EmbeddingObject::embeddings_iter(response.embeddings),
     )
@@ -95,9 +93,8 @@ pub async fn embed_vec(
 
     Ok(embedding)
 }
-
 #[instrument(name = "Generando embedding del query", skip(input, client))]
-pub async fn embed_single(input: String, client: &reqwest::Client) -> anyhow::Result<Vec<f32>> {
+pub async fn embed_single(input: String, client: &reqwest::Client) -> eyre::Result<Vec<f32>> {
     let global_start = std::time::Instant::now();
 
     #[derive(Serialize, Deserialize)]
@@ -151,5 +148,5 @@ pub async fn embed_single(input: String, client: &reqwest::Client) -> anyhow::Re
 }
 
 // TODO: Implementar las interfaces para poder realizar batch requests y ahorrar gastos.
-// pub async fn batch_embed(input: [&str]) -> anyhow::Result<Vec<Vec<f32>>> {
+// pub async fn batch_embed(input: [&str]) -> eyre::Result<Vec<Vec<f32>>> {
 // }

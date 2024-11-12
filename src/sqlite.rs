@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use futures::StreamExt;
 use rusqlite::{ffi::sqlite3_auto_extension, Connection};
@@ -8,13 +11,15 @@ use zerocopy::IntoBytes;
 use crate::{
     cli::{self, Model},
     configuration, openai,
+    routes::ReportError,
+    templates::Historial,
     utils::{self, TneaData},
 };
 
 #[cfg(feature = "local")]
 use crate::embeddings;
 
-pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result<()> {
+pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<()> {
     let mut statement = db.prepare("select id, template from tnea")?;
 
     let templates: Vec<(u64, String)> = match statement.query_map([], |row| {
@@ -25,7 +30,7 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result
         Ok(rows) => rows
             .map(|v| v.expect("Deberia tener un template"))
             .collect(),
-        Err(err) => return Err(anyhow::anyhow!(err)),
+        Err(err) => return Err(eyre::eyre!(err)),
     };
 
     let inserted = Arc::new(Mutex::new(0));
@@ -33,23 +38,21 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> anyhow::Result
 
     tracing::info!("Generando embeddings...");
 
-    let client = reqwest::Client::new();
-    let jh = templates
-        .chunks(chunk_size)
-        .into_iter()
-        .map(|chunk| match model {
-            #[cfg(feature = "local")]
-            cli::Model::Local => async { Err(anyhow!("Local model is unimplemented")) },
-            cli::Model::OpenAI => {
-                let indices: Vec<u64> = chunk.into_iter().map(|(id, _)| *id).collect();
-                let templates: Vec<String> = chunk
-                    .into_iter()
-                    .map(|(_, template)| template.clone())
-                    .collect();
+    let client = reqwest::ClientBuilder::new()
+        .timeout(Duration::from_secs(5))
+        .build()?;
 
-                openai::embed_vec(indices, templates, &client)
-            }
-        });
+    let jh = templates.chunks(chunk_size).map(|chunk| match model {
+        #[cfg(feature = "local")]
+        cli::Model::Local => async { Err(eyre!("Local model is unimplemented")) },
+        cli::Model::OpenAI => {
+            let indices: Vec<u64> = chunk.iter().map(|(id, _)| *id).collect();
+            let templates: Vec<String> =
+                chunk.iter().map(|(_, template)| template.clone()).collect();
+
+            openai::embed_vec(indices, templates, &client)
+        }
+    });
 
     let stream = futures::stream::iter(jh);
 
@@ -105,7 +108,7 @@ pub fn sync_fts_tnea(db: &Connection) {
         insert into fts_tnea(fts_tnea) values('optimize');
         ",
     )
-    .map_err(|err| anyhow::anyhow!(err))
+    .map_err(|err| eyre::eyre!(err))
     .expect("Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite");
 
     tracing::info!(
@@ -114,19 +117,19 @@ pub fn sync_fts_tnea(db: &Connection) {
     );
 }
 
-pub fn init_sqlite() -> anyhow::Result<rusqlite::Connection> {
+pub fn init_sqlite() -> eyre::Result<rusqlite::Connection> {
     unsafe {
         sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
     }
     let path = std::env::var("DATABASE_URL").map_err(|err| {
-        anyhow::anyhow!(
+        eyre::eyre!(
             "La variable de ambiente `DATABASE_URL` no fue encontrada. {}",
             err
         )
     })?;
     Ok(rusqlite::Connection::open(path)?)
 }
-pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> anyhow::Result<()> {
+pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()> {
     let (sqlite_version, vec_version): (String, String) =
         db.query_row("select sqlite_version(), vec_version()", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
@@ -136,15 +139,6 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> anyhow::Result<
 
     let statement = format!(
         "
-        create table if not exists historial (
-            id integer primary key,
-            query text not null unique,
-            result text not null,
-            timestamp datetime default current_timestamp
-        );
-
-        create index if not exists idx_query_timestamp on historial(query, timestamp);
-
         create table if not exists tnea_raw(
             id integer primary key,
             email text,
@@ -160,6 +154,12 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> anyhow::Result<
             estudios_mas_recientes text
         );
 
+        create table if not exists historial(
+            id integer primary key,
+            query text not null unique,
+            timestamp datetime default current_timestamp
+        );
+
         create table if not exists tnea(
             id integer primary key,
             email text,
@@ -167,6 +167,7 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> anyhow::Result<
             sexo text,
             template text
         );
+
 
         create virtual table if not exists fts_tnea using fts5(
             email, edad, sexo, template,
@@ -178,23 +179,23 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> anyhow::Result<
         match model {
             Model::OpenAI => {
                 "create virtual table if not exists vec_tnea using vec0(
-            row_id integer primary key,
-            template_embedding float[1536]
-        );"
+                    row_id integer primary key,
+                    template_embedding float[1536]
+                );"
             }
 
             #[cfg(feature = "local")]
             Model::Local => {
                 "create virtual table if not exists vec_tnea using vec0(
-            row_id integer primary key,
-            template_embedding float[512]
-        );"
+                    row_id integer primary key,
+                    template_embedding float[512]
+                );"
             }
         }
     );
 
     db.execute_batch(&statement)
-        .map_err(|err| anyhow::anyhow!(err))
+        .map_err(|err| eyre::eyre!(err))
         .expect(
             "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
         );
@@ -205,7 +206,7 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> anyhow::Result<
 pub fn insert_base_data(
     db: &rusqlite::Connection,
     template: &configuration::Template,
-) -> anyhow::Result<()> {
+) -> eyre::Result<()> {
     let num: usize = db.query_row("select count(*) from tnea", [], |row| row.get(0))?;
 
     // TODO: Añadir la condicion de que caduquen los datos.
@@ -304,7 +305,7 @@ pub fn insert_base_data(
         ))?;
 
         let inserted = statement.execute(rusqlite::params![])
-                .map_err(|err| anyhow::anyhow!(err))
+                .map_err(|err| eyre::eyre!(err))
                 .expect("deberia poder ser convertido a un string compatible con c o hubo un error en sqlite");
 
         tracing::info!(
@@ -318,4 +319,51 @@ pub fn insert_base_data(
     );
 
     Ok(())
+}
+
+pub fn update_historial(db: &Connection, query: &str) -> eyre::Result<(), ReportError> {
+    match db.execute(
+        "insert or replace into historial(query) values (?)",
+        [query],
+    ) {
+        Ok(updated) => {
+            tracing::info!("{} registros fueron añadidos al historial!", updated);
+        }
+        Err(err) => {
+            tracing::error!("{}", err);
+            return Err(ReportError(err.into()));
+        }
+    }
+
+    Ok(())
+}
+
+pub fn get_historial(db: &Connection) -> eyre::Result<Vec<Historial>, ReportError> {
+    let mut statement = match db.prepare("select id, query from historial order by timestamp desc")
+    {
+        Ok(stmt) => stmt,
+        Err(err) => {
+            tracing::error!("{}", err);
+            return Err(ReportError(err.into()));
+        }
+    };
+
+    let rows = match statement.query_map([], |row| {
+        let id: u64 = row.get(0).unwrap_or_default();
+        let query: String = row.get(1).unwrap_or_default();
+
+        let data = Historial::new(id, query);
+
+        Ok(data)
+    }) {
+        Ok(rows) => rows
+            .collect::<Result<Vec<Historial>, _>>()
+            .unwrap_or_default(),
+        Err(err) => {
+            tracing::error!("{}", err);
+            return Err(ReportError(err.into()));
+        }
+    };
+
+    Ok(rows)
 }

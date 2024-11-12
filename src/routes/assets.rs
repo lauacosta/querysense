@@ -1,21 +1,25 @@
 use axum::extract::Path;
+use axum::response::{IntoResponse, Response};
+use http::StatusCode;
 
-static INDEX_CSS: &str = include_str!("../../assets/index.css");
-static INDEX_JS: &str = include_str!("../../assets/index.js");
+static STYLES_CSS: &str = include_str!("../../dist/styles.css");
+static MAIN_JS: &str = include_str!("../../dist/main.js");
 
-pub async fn handle_assets(Path(path): Path<String>) -> impl axum::response::IntoResponse {
-    let mut headers = http::HeaderMap::new();
-
-    if path == "index.css" {
-        headers.insert(http::header::CONTENT_TYPE, "text/css".parse().unwrap());
-        (http::StatusCode::OK, headers, INDEX_CSS)
-    } else if path == "index.js" {
-        headers.insert(
-            http::header::CONTENT_TYPE,
-            "application/javascript".parse().unwrap(),
-        );
-        (http::StatusCode::OK, headers, INDEX_JS)
-    } else {
-        (http::StatusCode::NOT_FOUND, headers, "")
+pub async fn handle_assets(Path(path): Path<String>) -> Response {
+    match path.as_str() {
+        "styles.css" => {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(http::header::CONTENT_TYPE, "text/css".parse().unwrap());
+            (StatusCode::OK, headers, STYLES_CSS).into_response()
+        }
+        "main.js" => {
+            let mut headers = http::HeaderMap::new();
+            headers.insert(
+                http::header::CONTENT_TYPE,
+                "application/javascript".parse().unwrap(),
+            );
+            (StatusCode::OK, headers, MAIN_JS).into_response()
+        }
+        _ => StatusCode::NOT_FOUND.into_response(),
     }
 }

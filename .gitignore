@@ -10,3 +10,7 @@ querysense.db
 /dist
 /sql
 /csv
+/backup
+/node_modules
+bun.lockb
+/release

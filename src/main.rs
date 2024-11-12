@@ -3,31 +3,45 @@ use querysense::{
     cli::{Cli, Commands, SyncStrategy},
     configuration, openai, sqlite, startup,
 };
-use tracing::Level;
+use tracing::{level_filters::LevelFilter, Level};
+use tracing_error::ErrorLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Registry};
+use tracing_tree::HierarchicalLayer;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> eyre::Result<()> {
+    color_eyre::install()?;
+    dotenvy::dotenv()
+        .map_err(|err| eyre::eyre!("El archivo .env no fue encontrado. err: {}", err))
+        .unwrap();
+
     let cli = Cli::parse();
-    dotenvy::dotenv()?;
-
     let level = match cli.loglevel.to_lowercase().trim() {
         "trace" => Level::TRACE,
         "debug" => Level::DEBUG,
         "info" => Level::INFO,
         _ => {
-            return Err(anyhow::anyhow!(
+            return Err(eyre::eyre!(
                 "Log Level desconocido, utiliza `INFO`, `DEBUG` o `TRACE`."
             ));
         }
     };
 
-    tracing_subscriber::fmt().with_max_level(level).init();
+    Registry::default()
+        .with(LevelFilter::from_level(level))
+        .with(
+            HierarchicalLayer::new(2)
+                .with_targets(true)
+                .with_bracketed_fields(true),
+        )
+        .with(ErrorLayer::default())
+        .init();
 
     let template = std::env::var("TEMPLATE").map_err(|err| {
-        anyhow::anyhow!("Hubo un error al leer la variable de entorno `TEMPLATE` {err}.")
+        eyre::eyre!("Hubo un error al leer la variable de entorno `TEMPLATE` {err}.")
     })?;
 
     let template = configuration::Template::try_from(template)
-        .map_err(|err| anyhow::anyhow!("Hubo un error al parsear el template {err}"))?;
+        .map_err(|err| eyre::eyre!("Hubo un error al parsear el template {err}"))?;
 
     match cli.command {
         Commands::Serve {
