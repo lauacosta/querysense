@@ -13,3 +13,4 @@ querysense.db
 /backup
 /node_modules
 bun.lockb
+/release

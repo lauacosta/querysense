@@ -34,17 +34,17 @@ body {
     margin-bottom: 15px;
 }
 
-.history-list {
+.historial {
     list-style-type: none;
 }
 
-.history-item {
+.historial-item {
     padding: 8px 0;
     border-bottom: 1px solid #eee;
     cursor: pointer;
 }
 
-.history-item:hover {
+.historial-item:hover {
     background-color: #e9e9e9;
 }
 
@@ -155,14 +155,6 @@ button:active {
     color: #666;
     margin-top: 8px;
     text-align: center;
-}
-
-.search-input {
-    flex: 1;
-    padding: 8px 12px;
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 14px;
 }
 
 .search-container {

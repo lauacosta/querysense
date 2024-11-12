@@ -14,32 +14,7 @@ use http::StatusCode;
 pub use index::*;
 pub use search::*;
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct Historial {
-    pub id: usize,
-    pub query: String,
-    pub result: String,
-    pub timestamp: Option<chrono::NaiveDateTime>,
-}
-
-impl Historial {
-    #[must_use]
-    pub fn new(
-        id: usize,
-        query: String,
-        result: String,
-        timestamp: Option<chrono::NaiveDateTime>,
-    ) -> Self {
-        Self {
-            id,
-            query,
-            result,
-            timestamp,
-        }
-    }
-}
+use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
 pub enum SearchStrategy {
@@ -67,7 +42,7 @@ impl TryFrom<String> for SearchStrategy {
     }
 }
 
-pub struct ReportError(eyre::Report);
+pub struct ReportError(pub eyre::Report);
 
 impl From<eyre::Report> for ReportError {
     fn from(err: eyre::Report) -> Self {

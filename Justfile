@@ -1,6 +1,11 @@
 serve:
-    bun vite build
     cargo run --quiet --release -- serve
+
+all: assets serve
+
+
+assets:
+    bun vite build
 
 sync:
     cargo run --quiet --release -- sync 

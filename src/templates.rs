@@ -20,13 +20,16 @@ impl IntoResponse for DisplayableContent {
 
 #[derive(Template)]
 #[template(path = "index.html")]
-pub struct Index;
+pub struct Index {
+    pub historial: Vec<Historial>,
+}
 
 #[derive(Template)]
 #[template(path = "table.html")]
 pub struct Table {
     pub msg: String,
     pub table: Vec<TneaDisplay>,
+    pub historial: Vec<Historial>,
 }
 
 impl Default for Table {
@@ -34,6 +37,7 @@ impl Default for Table {
         Self {
             msg: "No se encontraron ningun registro.".to_string(),
             table: vec![TneaDisplay::default()],
+            historial: vec![Historial::default()],
         }
     }
 }
@@ -43,6 +47,7 @@ impl Default for Table {
 pub struct RrfTable {
     pub msg: String,
     pub table: Vec<ReRankDisplay>,
+    pub historial: Vec<Historial>,
 }
 
 impl Default for RrfTable {
@@ -50,6 +55,7 @@ impl Default for RrfTable {
         Self {
             msg: "No se encontraron ningun registro.".to_string(),
             table: vec![ReRankDisplay::default()],
+            historial: vec![Historial::default()],
         }
     }
 }
@@ -160,5 +166,18 @@ impl Display for Sexo {
             Sexo::M => "M",
         };
         write!(f, "{}", content)
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Historial {
+    pub id: u64,
+    pub query: String,
+}
+
+impl Historial {
+    #[must_use]
+    pub fn new(id: u64, query: String) -> Self {
+        Self { id, query }
     }
 }

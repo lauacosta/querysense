@@ -11,6 +11,8 @@ use zerocopy::IntoBytes;
 use crate::{
     cli::{self, Model},
     configuration, openai,
+    routes::ReportError,
+    templates::Historial,
     utils::{self, TneaData},
 };
 
@@ -137,15 +139,6 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()
 
     let statement = format!(
         "
-        create table if not exists historial (
-            id integer primary key,
-            query text not null unique,
-            result text not null,
-            timestamp datetime default current_timestamp
-        );
-
-        create index if not exists idx_query_timestamp on historial(query, timestamp);
-
         create table if not exists tnea_raw(
             id integer primary key,
             email text,
@@ -161,6 +154,12 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()
             estudios_mas_recientes text
         );
 
+        create table if not exists historial(
+            id integer primary key,
+            query text not null unique,
+            timestamp datetime default current_timestamp
+        );
+
         create table if not exists tnea(
             id integer primary key,
             email text,
@@ -168,6 +167,7 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()
             sexo text,
             template text
         );
+
 
         create virtual table if not exists fts_tnea using fts5(
             email, edad, sexo, template,
@@ -179,17 +179,17 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()
         match model {
             Model::OpenAI => {
                 "create virtual table if not exists vec_tnea using vec0(
-            row_id integer primary key,
-            template_embedding float[1536]
-        );"
+                    row_id integer primary key,
+                    template_embedding float[1536]
+                );"
             }
 
             #[cfg(feature = "local")]
             Model::Local => {
                 "create virtual table if not exists vec_tnea using vec0(
-            row_id integer primary key,
-            template_embedding float[512]
-        );"
+                    row_id integer primary key,
+                    template_embedding float[512]
+                );"
             }
         }
     );
@@ -319,4 +319,51 @@ pub fn insert_base_data(
     );
 
     Ok(())
+}
+
+pub fn update_historial(db: &Connection, query: &str) -> eyre::Result<(), ReportError> {
+    match db.execute(
+        "insert or replace into historial(query) values (?)",
+        [query],
+    ) {
+        Ok(updated) => {
+            tracing::info!("{} registros fueron añadidos al historial!", updated);
+        }
+        Err(err) => {
+            tracing::error!("{}", err);
+            return Err(ReportError(err.into()));
+        }
+    }
+
+    Ok(())
+}
+
+pub fn get_historial(db: &Connection) -> eyre::Result<Vec<Historial>, ReportError> {
+    let mut statement = match db.prepare("select id, query from historial order by timestamp desc")
+    {
+        Ok(stmt) => stmt,
+        Err(err) => {
+            tracing::error!("{}", err);
+            return Err(ReportError(err.into()));
+        }
+    };
+
+    let rows = match statement.query_map([], |row| {
+        let id: u64 = row.get(0).unwrap_or_default();
+        let query: String = row.get(1).unwrap_or_default();
+
+        let data = Historial::new(id, query);
+
+        Ok(data)
+    }) {
+        Ok(rows) => rows
+            .collect::<Result<Vec<Historial>, _>>()
+            .unwrap_or_default(),
+        Err(err) => {
+            tracing::error!("{}", err);
+            return Err(ReportError(err.into()));
+        }
+    };
+
+    Ok(rows)
 }

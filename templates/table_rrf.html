@@ -1,9 +1,14 @@
 {%- import "./componentes/form.html" as scope -%}
-{%- import "./componentes/historial.html" as cache -%}
 {% extends "base.html" %}
 
 {%block historial %}
-    {% call cache::historial("search") %}
+    <ul class="historial" id="historial">
+    {% for el in historial %} 
+        <li class="historial-item"> 
+            {{ el.query }} 
+        </li>
+    {% endfor %}
+    </ul>
 {% endblock %}
 
 {% block content %}

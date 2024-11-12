@@ -1,10 +1,22 @@
 document.addEventListener("DOMContentLoaded", function () {
+	initHistorial();
 	initKeyboard();
 	initForm();
 	initPagination();
 	initCsv();
 	initSlider();
 });
+
+function initHistorial() {
+	const historialItems = document.querySelectorAll(".historial-item");
+	console.log(historialItems);
+	historialItems.forEach((item) => {
+		item.addEventListener("click", function () {
+			const queryContent = item.textContent || "";
+			document.getElementById("search-input").value = queryContent.trim();
+		});
+	});
+}
 
 /**
  * Inicializa los atajos de teclado para la página.
@@ -13,7 +25,7 @@ function initKeyboard() {
 	document.addEventListener(
 		"keydown",
 		function (event) {
-			const input = document.getElementById("query");
+			const input = document.getElementById("search-input");
 			if (event.ctrlKey && event.key === "b") {
 				event.preventDefault();
 				input.focus();
@@ -140,7 +152,7 @@ function initForm() {
 	if (Object.keys(searchConfig).length === 0) {
 		return;
 	}
-	document.getElementById("query").value = searchConfig.query;
+	document.getElementById("search-input").value = searchConfig.query;
 	document.getElementById("strategy").value = searchConfig.strategy;
 	document.getElementById("age_min").value = searchConfig.edad_min;
 	document.getElementById("age_max").value = searchConfig.edad_max;

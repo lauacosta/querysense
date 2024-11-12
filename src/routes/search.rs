@@ -10,6 +10,7 @@ use crate::{
     cli::Cache,
     openai,
     routes::{ReportError, SearchStrategy},
+    sqlite,
     startup::AppState,
     templates::{DisplayableContent, ReRankDisplay, RrfTable, Sexo, Table, TableData, TneaDisplay},
 };
@@ -21,7 +22,6 @@ pub struct Params {
     sexo: Sexo,
     edad_min: u64,
     edad_max: u64,
-
     peso_fts: f32,
     peso_semantic: f32,
 }
@@ -436,34 +436,42 @@ pub async fn search(
     };
 
     match table {
-        TableData::Standard(vec) => {
+        TableData::Standard(table) => {
             tracing::info!(
-                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}` (umbral: {})",
+                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
                 params.query,
-                vec.len(),
-                vec.first().map_or_else(Default::default, |d| d.score),
-                vec.last().map_or_else(Default::default, |d| d.score),
-                -1.0
+                table.len(),
+                table.first().map_or_else(Default::default, |d| d.score),
+                table.last().map_or_else(Default::default, |d| d.score),
             );
+
+            sqlite::update_historial(&db, &params.query)?;
+
+            let historial = sqlite::get_historial(&db)?;
 
             Ok(DisplayableContent::Common(Table {
-                msg: format!("Hay un total de {} resultados.", vec.len()),
-                table: vec,
+                msg: format!("Hay un total de {} resultados.", table.len()),
+                table,
+                historial,
             }))
         }
-        TableData::Rrf(vec) => {
+        TableData::Rrf(table) => {
             tracing::info!(
-                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}` (umbral: {})",
+                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
                 params.query,
-                vec.len(),
-                vec.first().map_or_else(Default::default, |d| d.combined_rank),
-                vec.last().map_or_else(Default::default, |d| d.combined_rank),
-                -1.0
+                table.len(),
+                table.first().map_or_else(Default::default, |d| d.combined_rank),
+                table.last().map_or_else(Default::default, |d| d.combined_rank),
             );
 
+            sqlite::update_historial(&db, &params.query)?;
+
+            let historial = sqlite::get_historial(&db)?;
+
             Ok(DisplayableContent::RrfTable(RrfTable {
-                msg: format!("Hay un total de {} resultados.", vec.len()),
-                table: vec,
+                msg: format!("Hay un total de {} resultados.", table.len()),
+                table,
+                historial,
             }))
         }
     }

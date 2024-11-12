@@ -1,9 +1,14 @@
 {%- import "./componentes/form.html" as scope -%}
-{%- import "./componentes/historial.html" as cache -%}
 {% extends "base.html" %}
 
-{%block historial %}
-    {% call cache::historial("search") %}
+{% block historial %}
+    <ul class="historial" id="historial">
+    {% for el in historial %} 
+        <li class="historial-item"> 
+            {{ el.query }} 
+        </li>
+    {% endfor %}
+    </ul>
 {% endblock %}
 
 {% block content %}
@@ -36,7 +41,7 @@
                     <td> {{ row.edad }} </td>
                     <td> {{ row.sexo }} </td> 
                     <td> {{ row.template|safe }} </td> 
-                    <td> {{ row.match_type}} </td>
+                    <td> {{ row.match_type }} </td>
                 </tr>
                 {% endfor %} 
             </tbody>
