@@ -2,6 +2,7 @@ use axum::{
     extract::{Query, State},
     Extension,
 };
+use rusqlite::ToSql;
 use serde::Deserialize;
 use tracing::instrument;
 use zerocopy::IntoBytes;
@@ -12,12 +13,15 @@ use crate::{
     routes::{ReportError, SearchStrategy},
     sqlite,
     startup::AppState,
-    templates::{DisplayableContent, ReRankDisplay, RrfTable, Sexo, Table, TableData, TneaDisplay},
+    templates::{
+        Fallback, Historial, ReRankDisplay, RrfTable, SearchResponse, Sexo, Table, TneaDisplay,
+    },
 };
 
 #[derive(Deserialize, Debug)]
 pub struct Params {
-    query: String,
+    #[serde(rename = "query")]
+    search_str: String,
     strategy: SearchStrategy,
     sexo: Sexo,
     edad_min: u64,
@@ -32,7 +36,7 @@ pub async fn search(
     Query(params): Query<Params>,
     State(app): State<AppState>,
     client: Extension<reqwest::Client>,
-) -> eyre::Result<DisplayableContent, ReportError> {
+) -> SearchResponse {
     match app.cache {
         Cache::Enabled => {
             todo!();
@@ -41,10 +45,28 @@ pub async fn search(
     };
     let db = app.db.lock().await;
 
-    let table = match params.strategy {
+    let (query, provincia, ciudad) =
+        if let Some((query, filters)) = params.search_str.split_once('|') {
+            if let Some((provincia, ciudad)) = filters.split_once(',') {
+                (
+                    sqlite::normalize(query),
+                    sqlite::normalize(provincia),
+                    sqlite::normalize(ciudad),
+                )
+            } else {
+                (sqlite::normalize(query), String::new(), String::new())
+            }
+        } else {
+            (
+                sqlite::normalize(&params.search_str),
+                String::new(),
+                String::new(),
+            )
+        };
+
+    match params.strategy {
         SearchStrategy::Fts => {
-            let mut statement = match db.prepare(
-                "select
+            let stmt_str = "select
                     rank as score, 
                     email, 
                     provincia,
@@ -55,17 +77,32 @@ pub async fn search(
                     'fts' as match_type
                 from fts_tnea
                 where template match :query
-                order by rank 
-                ",
-            ) {
-                Ok(stmt) => stmt,
-                Err(err) => {
-                    tracing::error!("{}", err);
-                    return Err(ReportError(err.into()));
-                }
+                and edad between :edad_min and :edad_max
+                "
+            .to_string();
+
+            let mut search_query = SearchQuery::new(&db, &stmt_str);
+            search_query.add_bindings(&[&query, &params.edad_min, &params.edad_max]);
+
+            if !provincia.is_empty() {
+                search_query.add_filter(" and provincia like :provincia", &[&provincia]);
+            }
+            if !ciudad.is_empty() {
+                search_query.add_filter(" and ciudad like :ciudad", &[&ciudad]);
+            }
+
+            let sexo = params.sexo;
+            match sexo {
+                Sexo::M => search_query.add_filter(" and sexo = :sexo", &[&sexo]),
+                Sexo::F => search_query.add_filter(" and sexo = :sexo", &[&sexo]),
+                Sexo::U => (),
             };
 
-            let mut rows = match statement.query_map(&[(":query", &params.query)], |row| {
+            search_query.push_str(" order by rank");
+
+            println!("{}", search_query.stmt_str);
+
+            let table = match search_query.execute(|row| {
                 let score = row.get::<_, f32>(0).unwrap_or_default() * -1.;
                 let email: String = row.get(1).unwrap_or_default();
                 let provincia: String = row.get(2).unwrap_or_default();
@@ -77,35 +114,39 @@ pub async fn search(
                 let data = TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
                 Ok(data)
             }) {
-                Ok(rows) => rows
-                    .collect::<Result<Vec<TneaDisplay>, _>>()
-                    .unwrap_or_default(),
-                Err(err) => {
-                    tracing::error!("{}", err);
-                    return Err(ReportError(err.into()));
-                }
+                Ok(rows) => rows,
+                Err(response) => return response,
             };
 
-            match params.sexo {
-                Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
-                Sexo::M => rows.retain(|x| {
-                    x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
-                }),
-                Sexo::F => rows.retain(|x| {
-                    x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
-                }),
+            tracing::info!(
+                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
+                query,
+                table.len(),
+                table.first().map_or_else(Default::default, |d| d.score),
+                table.last().map_or_else(Default::default, |d| d.score),
+            );
+
+            let historial = match update_historial(&db, &params.search_str) {
+                Ok(historial) => historial,
+                Err(response) => return response,
             };
 
-            TableData::Standard(rows)
+            Table {
+                msg: format!("Hay un total de {} resultados.", table.len()),
+                table,
+                historial,
+            }
+            .into()
         }
         SearchStrategy::Semantic => {
-            let query_emb = openai::embed_single(params.query.clone(), &client)
+            let query_emb = openai::embed_single(query.to_string(), &client)
                 .await
                 .map_err(|err| tracing::error!("{err}"))
                 .expect("Fallo al crear un embedding del query");
 
-            let mut statement = match db.prepare(
-                "
+            let embedding = query_emb.as_bytes();
+
+            let stmt_str = "
                 select
                     vec_tnea.distance,
                     tnea.email,
@@ -119,65 +160,88 @@ pub async fn search(
                 left join tnea on tnea.id = vec_tnea.row_id
                 where template_embedding match :embedding
                 and k = 1000
-                ",
-            ) {
-                Ok(stmt) => stmt,
-                Err(err) => {
-                    tracing::error!("{}", err);
-                    return Err(ReportError(err.into()));
-                }
-            };
+                and tnea.edad between :edad_min and :edad_max
+                "
+            .to_string();
 
-            let mut rows =
-                match statement.query_map(&[(":embedding", query_emb.as_bytes())], |row| {
-                    let score = row.get::<_, f32>(0).unwrap_or_default();
-                    let email: String = row.get(1).unwrap_or_default();
-                    let provincia: String = row.get(2).unwrap_or_default();
-                    let ciudad: String = row.get(3).unwrap_or_default();
-                    let edad: u64 = row.get(4).unwrap_or_default();
-                    let sexo: Sexo = row.get(5).unwrap_or_default();
-                    let template: String = row.get(6).unwrap_or_default();
+            let mut search_query = SearchQuery::new(&db, &stmt_str);
+            search_query.add_bindings(&[&embedding, &params.edad_min, &params.edad_max]);
 
-                    let data =
-                        TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
+            if !provincia.is_empty() {
+                search_query.add_filter(" and tnea.provincia like :provincia", &[&provincia]);
+            }
 
-                    Ok(data)
-                }) {
-                    Ok(rows) => rows
-                        .collect::<Result<Vec<TneaDisplay>, _>>()
-                        .unwrap_or_default(),
-                    Err(err) => {
-                        tracing::error!("{}", err);
-                        return Err(ReportError(err.into()));
-                    }
-                };
+            if !ciudad.is_empty() {
+                search_query.add_filter(" and tnea.ciudad like :ciudad", &[&ciudad]);
+            }
 
             match params.sexo {
-                Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
-                Sexo::M => rows.retain(|x| {
-                    x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
-                }),
-                Sexo::F => rows.retain(|x| {
-                    x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
-                }),
+                Sexo::U => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::U]),
+                Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
+                Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
             };
-            TableData::Standard(rows)
+
+            let table = match search_query.execute(|row| {
+                let score = row.get::<_, f32>(0).unwrap_or_default();
+                let email: String = row.get(1).unwrap_or_default();
+                let provincia: String = row.get(2).unwrap_or_default();
+                let ciudad: String = row.get(3).unwrap_or_default();
+                let edad: u64 = row.get(4).unwrap_or_default();
+                let sexo: Sexo = row.get(5).unwrap_or_default();
+                let template: String = row.get(6).unwrap_or_default();
+
+                let data = TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
+
+                Ok(data)
+            }) {
+                Ok(rows) => rows,
+                Err(response) => return response,
+            };
+
+            tracing::info!(
+                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
+                query,
+                table.len(),
+                table.first().map_or_else(Default::default, |d| d.score),
+                table.last().map_or_else(Default::default, |d| d.score),
+            );
+
+            let historial = match update_historial(&db, &params.search_str) {
+                Ok(historial) => historial,
+                Err(response) => return response,
+            };
+
+            Table {
+                msg: format!("Hay un total de {} resultados.", table.len()),
+                table,
+                historial,
+            }
+            .into()
         }
         SearchStrategy::HybridRrf => {
-            let query_emb = openai::embed_single(params.query.clone(), &client)
+            let query_emb = openai::embed_single(query.to_string(), &client)
                 .await
                 .map_err(|err| tracing::error!("{err}"))
                 .expect("Fallo al crear un embedding del query");
-
-            let k: i64 = 1_000;
-
+            let embedding = query_emb.as_bytes();
             // Normalizo los datos que estan en un rango de 0 a 100 para que esten de 0 a 1.
             let weight_vec = params.peso_semantic / 100.0;
             let weight_fts: f32 = params.peso_fts / 100.0;
             let rrf_k: i64 = 60;
+            let k: i64 = 1_000;
 
-            let mut statement = match db.prepare(
-                "
+            let mut bindings: Vec<&dyn ToSql> = vec![
+                &embedding as &dyn ToSql,
+                &query,
+                &k,
+                &weight_fts,
+                &weight_vec,
+                &rrf_k,
+                &params.edad_min,
+                &params.edad_max,
+            ];
+
+            let mut stmt_str = "
                 with vec_matches as (
                 select
                     row_id,
@@ -218,68 +282,114 @@ pub async fn search(
                 from fts_matches
                 full outer join vec_matches on vec_matches.row_id = fts_matches.row_id
                 join tnea on tnea.id = coalesce(fts_matches.row_id, vec_matches.row_id)
+                where tnea.edad between :edad_min and :edad_max
+            "
+            .to_string();
+
+            if !provincia.is_empty() {
+                stmt_str.push_str(" and provincia like :provincia");
+                bindings.push(&provincia as &dyn ToSql);
+            }
+
+            if !ciudad.is_empty() {
+                stmt_str.push_str(" and ciudad like :ciudad");
+                bindings.push(&ciudad as &dyn ToSql);
+            }
+
+            stmt_str.push_str(
+                " 
                 order by combined_rank desc
-                )
-                select * from final;                
-            ",
-            ) {
+                ) 
+                select * from final;
+                ",
+            );
+
+            let mut statement = match db.prepare(&stmt_str) {
                 Ok(stmt) => stmt,
                 Err(err) => {
-                    tracing::error!("{}", err);
-                    return Err(ReportError(err.into()));
+                    let err = ReportError(err.into());
+                    tracing::error!("{:?}", err);
+                    return Fallback.into();
                 }
             };
 
-            let mut rows = match statement.query_map(
-                rusqlite::named_params! { ":embedding": query_emb.as_bytes(), ":query": params.query, ":k": k, ":weight_fts":weight_fts, ":weight_vec":weight_vec ,":rrf_k":rrf_k },
-                |row| {
-                    let template: String = row.get(0).unwrap_or_default();
-                    let email: String = row.get(1).unwrap_or_default();
-                    let provincia: String = row.get(2).unwrap_or_default();
-                    let ciudad: String = row.get(3).unwrap_or_default();
-                    let edad: u64 = row.get(4).unwrap_or_default();
-                    let sexo: Sexo = row.get(5).unwrap_or_default();
-                    let vec_rank: i64= row.get(6).unwrap_or_default();
-                    let fts_rank: i64= row.get(7).unwrap_or_default();
-                    let combined_rank: f32 = row.get(8).unwrap_or_default();
-                    let vec_score: f32= row.get(9).unwrap_or_default();
-                    let fts_score = row.get::<_, f32>(10).unwrap_or_default() * -1.;
+            let mut table = match statement.query_map(&*bindings, |row| {
+                let template: String = row.get(0).unwrap_or_default();
+                let email: String = row.get(1).unwrap_or_default();
+                let provincia: String = row.get(2).unwrap_or_default();
+                let ciudad: String = row.get(3).unwrap_or_default();
+                let edad: u64 = row.get(4).unwrap_or_default();
+                let sexo: Sexo = row.get(5).unwrap_or_default();
+                let vec_rank: i64 = row.get(6).unwrap_or_default();
+                let fts_rank: i64 = row.get(7).unwrap_or_default();
+                let combined_rank: f32 = row.get(8).unwrap_or_default();
+                let vec_score: f32 = row.get(9).unwrap_or_default();
+                let fts_score = row.get::<_, f32>(10).unwrap_or_default() * -1.;
 
-
-                    let data = ReRankDisplay::new(template,email,provincia, ciudad, edad, sexo, fts_rank, vec_rank, combined_rank, vec_score, fts_score);
-                    Ok(data)
-                },
-            ) {
+                let data = ReRankDisplay::new(
+                    template,
+                    email,
+                    provincia,
+                    ciudad,
+                    edad,
+                    sexo,
+                    fts_rank,
+                    vec_rank,
+                    combined_rank,
+                    vec_score,
+                    fts_score,
+                );
+                Ok(data)
+            }) {
                 Ok(rows) => rows
                     .collect::<Result<Vec<ReRankDisplay>, _>>()
                     .unwrap_or_default(),
                 Err(err) => {
-                    tracing::error!("{}", err);
-                    return Err(ReportError(err.into()));
-
+                    let err = ReportError(err.into());
+                    tracing::error!("{:?}", err);
+                    return Fallback.into();
                 }
             };
             match params.sexo {
-                Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
-                Sexo::M => rows.retain(|x| {
+                Sexo::U => table.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
+                Sexo::M => table.retain(|x| {
                     x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
                 }),
-                Sexo::F => rows.retain(|x| {
+                Sexo::F => table.retain(|x| {
                     x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
                 }),
             };
-            TableData::Rrf(rows)
+
+            tracing::info!(
+                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
+                query,
+                table.len(),
+                table.first().map_or_else(Default::default, |d| d.combined_rank),
+                table.last().map_or_else(Default::default, |d| d.combined_rank),
+            );
+
+            let historial = match update_historial(&db, &params.search_str) {
+                Ok(historial) => historial,
+                Err(response) => return response,
+            };
+
+            RrfTable {
+                msg: format!("Hay un total de {} resultados.", table.len()),
+                table,
+                historial,
+            }
+            .into()
         }
         SearchStrategy::HybridKf => {
-            let query_emb = openai::embed_single(params.query.clone(), &client)
+            let query_emb = openai::embed_single(query.to_string(), &client)
                 .await
                 .map_err(|err| tracing::error!("{err}"))
                 .expect("Fallo al crear un embedding del query");
 
+            let embedding = query_emb.as_bytes();
             let k: i64 = 1000;
 
-            let mut statement = match db.prepare(
-                "
+            let stmt_str = "
                 with fts_matches as (
                 select
                     rowid as row_id,
@@ -318,61 +428,80 @@ pub async fn search(
                     combined.match_type
                 from combined
                 left join tnea on tnea.id = combined.row_id
-                )
-                select * from final;
-                ",
-            ) {
-                Ok(stmt) => stmt,
-                Err(err) => {
-                    tracing::error!("{}", err);
-                    return Err(ReportError(err.into()));
-                }
-            };
+                where tnea.edad between :edad_min and :edad_max
+                "
+            .to_string();
 
-            let mut rows = match statement.query_map(
-                rusqlite::named_params! { ":embedding": query_emb.as_bytes(), ":query": params.query, ":k": k},
-                |row| {
-                    let template: String = row.get(0).unwrap_or_default();
-                    let email: String = row.get(1).unwrap_or_default();
-                    let provincia: String = row.get(2).unwrap_or_default();
-                    let ciudad: String = row.get(3).unwrap_or_default();
-                    let edad: u64 = row.get(4).unwrap_or_default();
-                    let sexo: Sexo= row.get(5).unwrap_or_default();
-                    let score: f32 = row.get(6).unwrap_or_default();
+            let mut search_query = SearchQuery::new(&db, &stmt_str);
+            search_query.add_bindings(&[
+                &k,
+                &query,
+                &embedding,
+                &params.edad_min,
+                &params.edad_max,
+            ]);
 
-                    let data = TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
-                    Ok(data)
-                },
-            ) {
-                Ok(rows) => rows
-                    .collect::<Result<Vec<TneaDisplay>, _>>()
-                    .unwrap_or_default(),
-                Err(err) => {
-                    tracing::error!("{}", err);
-                    return Err(ReportError(err.into()));
-                }
-            };
+            if !provincia.is_empty() {
+                search_query.add_filter(" and tnea.provincia like :provincia", &[&provincia]);
+            }
+
+            if !ciudad.is_empty() {
+                search_query.add_filter(" and tnea.ciudad like :ciudad", &[&ciudad]);
+            }
+
             match params.sexo {
-                Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
-                Sexo::M => rows.retain(|x| {
-                    x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
-                }),
-                Sexo::F => rows.retain(|x| {
-                    x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
-                }),
+                Sexo::U => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::U]),
+                Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
+                Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
             };
-            TableData::Standard(rows)
+
+            search_query.push_str(" ) select * from final;");
+
+            let rows = match search_query.execute(|row| {
+                let template: String = row.get(0).unwrap_or_default();
+                let email: String = row.get(1).unwrap_or_default();
+                let provincia: String = row.get(2).unwrap_or_default();
+                let ciudad: String = row.get(3).unwrap_or_default();
+                let edad: u64 = row.get(4).unwrap_or_default();
+                let sexo: Sexo = row.get(5).unwrap_or_default();
+                let score: f32 = row.get(6).unwrap_or_default();
+
+                let data = TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
+                Ok(data)
+            }) {
+                Ok(rows) => rows,
+                Err(response) => return response,
+            };
+
+            tracing::info!(
+                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
+                query,
+                rows.len(),
+                rows.first().map_or_else(Default::default, |d| d.score),
+                rows.last().map_or_else(Default::default, |d| d.score),
+            );
+
+            let historial = match update_historial(&db, &params.search_str) {
+                Ok(historial) => historial,
+                Err(response) => return response,
+            };
+
+            Table {
+                msg: format!("Hay un total de {} resultados.", rows.len()),
+                table: rows,
+                historial,
+            }
+            .into()
         }
         SearchStrategy::HybridReRank => {
-            let query_emb = openai::embed_single(params.query.clone(), &client)
+            let query_emb = openai::embed_single(query.to_string(), &client)
                 .await
                 .map_err(|err| tracing::error!("{err}"))
                 .expect("Fallo al crear un embedding del query");
-
+            let embedding = query_emb.as_bytes();
             let k: i64 = 1000;
 
-            let mut statement = match db.prepare(
-                "
+            let stmt_str = "
                 with fts_matches as (
                 select
                     rowid,
@@ -403,93 +532,149 @@ pub async fn search(
                 from fts_matches
                 left join tnea on tnea.id = fts_matches.rowid
                 left join embeddings on embeddings.rowid = fts_matches.rowid
-                order by vec_distance_cosine(:embedding, embeddings.template_embedding)
-                )
-                select * from final;
-                ",
-            ) {
-                Ok(stmt) => stmt,
-                Err(err) => {
-                    tracing::error!("{}", err);
-                    return Err(ReportError(err.into()));
-                }
-            };
+                where tnea.edad between :edad_min and :edad_max
+            "
+            .to_string();
 
-            let mut rows = match statement.query_map(
-                rusqlite::named_params! { ":embedding": query_emb.as_bytes(), ":query": params.query, ":k": k},
-                |row| {
-                    let template: String = row.get(0).unwrap_or_default();
-                    let email: String = row.get(1).unwrap_or_default();
-                    let provincia: String = row.get(2).unwrap_or_default();
-                    let ciudad: String = row.get(3).unwrap_or_default();
-                    let edad: u64= row.get(4).unwrap_or_default();
-                    let sexo:Sexo = row.get(5).unwrap_or_default();
-                    let score = row.get::<_, f32>(6).unwrap_or_default() * -1.;
+            let mut search_query = SearchQuery::new(&db, &stmt_str);
+            search_query.add_bindings(&[
+                &k,
+                &query,
+                &embedding,
+                &params.edad_min,
+                &params.edad_max,
+            ]);
 
-                    let data = TneaDisplay::new(email, provincia, ciudad,edad, sexo, template, score );
-                    Ok(data)
-                },
-            ) {
-                Ok(rows) => rows
-                    .collect::<Result<Vec<TneaDisplay>, _>>()
-                    .unwrap_or_default(),
-                Err(err) => {
-                    tracing::error!("{}", err);
-                    return Err(ReportError(err.into()));
-                }
-            };
+            if !provincia.is_empty() {
+                search_query.add_filter(" and tnea.provincia like :provincia", &[&provincia]);
+            }
+
+            if !ciudad.is_empty() {
+                search_query.add_filter(" and tnea.ciudad like :ciudad", &[&ciudad]);
+            }
+
             match params.sexo {
-                Sexo::U => rows.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
-                Sexo::M => rows.retain(|x| {
-                    x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
-                }),
-                Sexo::F => rows.retain(|x| {
-                    x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
-                }),
+                Sexo::U => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::U]),
+                Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
+                Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
             };
 
-            TableData::Standard(rows)
+            search_query.push_str(
+                " order by vec_distance_cosine(:embedding, embeddings.template_embedding)
+                )
+                select * from final;",
+            );
+
+            let rows = match search_query.execute(|row| {
+                let template: String = row.get(0).unwrap_or_default();
+                let email: String = row.get(1).unwrap_or_default();
+                let provincia: String = row.get(2).unwrap_or_default();
+                let ciudad: String = row.get(3).unwrap_or_default();
+                let edad: u64 = row.get(4).unwrap_or_default();
+                let sexo: Sexo = row.get(5).unwrap_or_default();
+                let score = row.get::<_, f32>(6).unwrap_or_default() * -1.;
+
+                let data = TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
+                Ok(data)
+            }) {
+                Ok(rows) => rows,
+                Err(response) => return response,
+            };
+
+            tracing::info!(
+                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
+                query,
+                rows.len(),
+                rows.first().map_or_else(Default::default, |d| d.score),
+                rows.last().map_or_else(Default::default, |d| d.score),
+            );
+
+            let historial = match update_historial(&db, &params.search_str) {
+                Ok(historial) => historial,
+                Err(response) => return response,
+            };
+
+            Table {
+                msg: format!("Hay un total de {} resultados.", rows.len()),
+                table: rows,
+                historial,
+            }
+            .into()
+        }
+    }
+}
+
+fn update_historial(
+    db: &rusqlite::Connection,
+    query: &str,
+) -> eyre::Result<Vec<Historial>, SearchResponse> {
+    if let Err(err) = sqlite::update_historial(db, query) {
+        tracing::error!("{:?}", err);
+        return Err(Fallback.into());
+    }
+
+    let historial = match sqlite::get_historial(db) {
+        Ok(historial) => historial,
+        Err(err) => {
+            tracing::error!("{:?}", err);
+            return Err(Fallback.into());
         }
     };
+    Ok(historial)
+}
 
-    match table {
-        TableData::Standard(table) => {
-            tracing::info!(
-                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
-                params.query,
-                table.len(),
-                table.first().map_or_else(Default::default, |d| d.score),
-                table.last().map_or_else(Default::default, |d| d.score),
-            );
+struct SearchQuery<'a> {
+    db: &'a rusqlite::Connection,
+    pub stmt_str: String,
+    pub bindings: Vec<&'a dyn ToSql>,
+}
 
-            sqlite::update_historial(&db, &params.query)?;
-
-            let historial = sqlite::get_historial(&db)?;
-
-            Ok(DisplayableContent::Common(Table {
-                msg: format!("Hay un total de {} resultados.", table.len()),
-                table,
-                historial,
-            }))
+impl<'a> SearchQuery<'a> {
+    fn new(db: &'a rusqlite::Connection, base_stmt: &str) -> Self {
+        Self {
+            db,
+            stmt_str: base_stmt.to_string(),
+            bindings: Vec::new(),
         }
-        TableData::Rrf(table) => {
-            tracing::info!(
-                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
-                params.query,
-                table.len(),
-                table.first().map_or_else(Default::default, |d| d.combined_rank),
-                table.last().map_or_else(Default::default, |d| d.combined_rank),
-            );
+    }
 
-            sqlite::update_historial(&db, &params.query)?;
+    fn add_filter(&mut self, filter: &str, binding: &[&'a dyn ToSql]) {
+        self.stmt_str.push_str(filter);
+        self.bindings.extend_from_slice(binding);
+    }
 
-            let historial = sqlite::get_historial(&db)?;
+    fn add_bindings(&mut self, binding: &[&'a dyn ToSql]) {
+        self.bindings.extend_from_slice(binding);
+    }
 
-            Ok(DisplayableContent::RrfTable(RrfTable {
-                msg: format!("Hay un total de {} resultados.", table.len()),
-                table,
-                historial,
-            }))
-        }
+    fn push_str(&mut self, stmt: &str) {
+        self.stmt_str.push_str(stmt);
+    }
+
+    fn execute<F>(&self, map_fn: F) -> Result<Vec<TneaDisplay>, SearchResponse>
+    where
+        F: Fn(&rusqlite::Row) -> rusqlite::Result<TneaDisplay>,
+    {
+        let mut statement = match self.db.prepare(&self.stmt_str) {
+            Ok(stmt) => stmt,
+            Err(err) => {
+                let err = ReportError(err.into());
+                tracing::error!("{:?}", err);
+                return Err(Fallback.into());
+            }
+        };
+
+        let table = match statement.query_map(&*self.bindings, map_fn) {
+            Ok(rows) => Ok(rows
+                .collect::<Result<Vec<TneaDisplay>, _>>()
+                .unwrap_or_default()),
+            Err(err) => {
+                let err = ReportError(err.into());
+                tracing::error!("{:?}", err);
+                return Err(Fallback.into());
+            }
+        };
+
+        table
     }
 }

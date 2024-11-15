@@ -1,20 +1,43 @@
 use std::fmt::Display;
 
 use askama_axum::{IntoResponse, Template};
-use rusqlite::types::{FromSql, FromSqlError, ValueRef};
+use rusqlite::{
+    types::{FromSql, FromSqlError, ValueRef},
+    ToSql,
+};
 use serde::Deserialize;
 
-pub enum DisplayableContent {
+pub enum SearchResponse {
     Common(Table),
     RrfTable(RrfTable),
+    Fallback(Fallback),
 }
 
-impl IntoResponse for DisplayableContent {
+impl IntoResponse for SearchResponse {
     fn into_response(self) -> askama_axum::Response {
         match self {
-            DisplayableContent::Common(table) => table.into_response(),
-            DisplayableContent::RrfTable(rrf_table) => rrf_table.into_response(),
+            SearchResponse::Common(table) => table.into_response(),
+            SearchResponse::RrfTable(rrf_table) => rrf_table.into_response(),
+            SearchResponse::Fallback(fallback) => fallback.into_response(),
         }
+    }
+}
+
+impl From<Table> for SearchResponse {
+    fn from(value: Table) -> Self {
+        SearchResponse::Common(value)
+    }
+}
+
+impl From<RrfTable> for SearchResponse {
+    fn from(value: RrfTable) -> Self {
+        SearchResponse::RrfTable(value)
+    }
+}
+
+impl From<Fallback> for SearchResponse {
+    fn from(value: Fallback) -> Self {
+        SearchResponse::Fallback(value)
     }
 }
 
@@ -23,6 +46,10 @@ impl IntoResponse for DisplayableContent {
 pub struct Index {
     pub historial: Vec<Historial>,
 }
+
+#[derive(Template)]
+#[template(path = "fallback.html")]
+pub struct Fallback;
 
 #[derive(Template)]
 #[template(path = "table.html")]
@@ -153,6 +180,17 @@ pub enum Sexo {
     U,
     F,
     M,
+}
+
+impl ToSql for Sexo {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        let value = match self {
+            Sexo::F => "F",
+            Sexo::M => "M",
+            Sexo::U => "U",
+        };
+        Ok(rusqlite::types::ToSqlOutput::from(value))
+    }
 }
 
 impl FromSql for Sexo {

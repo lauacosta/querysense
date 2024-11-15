@@ -42,6 +42,7 @@ impl TryFrom<String> for SearchStrategy {
     }
 }
 
+#[derive(Debug)]
 pub struct ReportError(pub eyre::Report);
 
 impl From<eyre::Report> for ReportError {

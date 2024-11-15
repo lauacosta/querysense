@@ -276,12 +276,6 @@ pub fn insert_base_data(
                 }
             };
 
-            let normalize = |str: &str| -> String {
-                str.trim_matches(|c| !char::is_ascii_alphabetic(&c))
-                    .to_lowercase()
-                    .replace("province", "")
-            };
-
             let descripcion = clean_html(&data.descripcion);
             let estudios = clean_html(&data.estudios);
             let estudios_mas_recientes = clean_html(&data.estudios_mas_recientes);
@@ -382,4 +376,12 @@ pub fn get_historial(db: &Connection) -> eyre::Result<Vec<Historial>, ReportErro
     };
 
     Ok(rows)
+}
+
+#[inline]
+pub fn normalize(str: &str) -> String {
+    str.trim_matches(|c| !char::is_ascii_alphabetic(&c))
+        .trim()
+        .to_lowercase()
+        .replace("province", "")
 }
