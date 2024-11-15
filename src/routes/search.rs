@@ -67,7 +67,9 @@ pub async fn search(
 
     match params.strategy {
         SearchStrategy::Fts => {
-            let stmt_str = "select
+            let mut search_query = SearchQuery::new(
+                &db,
+                "select
                     rank as score, 
                     email, 
                     provincia,
@@ -79,10 +81,8 @@ pub async fn search(
                 from fts_tnea
                 where template match :query
                 and edad between :edad_min and :edad_max
-                "
-            .to_string();
-
-            let mut search_query = SearchQuery::new(&db, &stmt_str);
+                ",
+            );
             search_query.add_bindings(&[&query, &params.edad_min, &params.edad_max]);
 
             if !provincia.is_empty() {
@@ -100,8 +100,6 @@ pub async fn search(
             };
 
             search_query.push_str(" order by rank");
-
-            println!("{}", search_query.stmt_str);
 
             let table = match search_query.execute(|row| {
                 let score = row.get::<_, f32>(0).unwrap_or_default() * -1.;
@@ -147,7 +145,9 @@ pub async fn search(
 
             let embedding = query_emb.as_bytes();
 
-            let stmt_str = "
+            let mut search_query = SearchQuery::new(
+                &db,
+                "
                 select
                     vec_tnea.distance,
                     tnea.email,
@@ -162,10 +162,8 @@ pub async fn search(
                 where template_embedding match :embedding
                 and k = 1000
                 and tnea.edad between :edad_min and :edad_max
-                "
-            .to_string();
-
-            let mut search_query = SearchQuery::new(&db, &stmt_str);
+                ",
+            );
             search_query.add_bindings(&[&embedding, &params.edad_min, &params.edad_max]);
 
             if !provincia.is_empty() {
@@ -177,7 +175,7 @@ pub async fn search(
             }
 
             match params.sexo {
-                Sexo::U => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::U]),
+                Sexo::U => (),
                 Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
                 Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
             };
@@ -231,7 +229,9 @@ pub async fn search(
             let rrf_k: i64 = 60;
             let k: i64 = 1_000;
 
-            let stmt_str = "
+            let mut search_query = SearchQuery::new(
+                &db,
+                "
                 with vec_matches as (
                 select
                     row_id,
@@ -273,10 +273,8 @@ pub async fn search(
                 full outer join vec_matches on vec_matches.row_id = fts_matches.row_id
                 join tnea on tnea.id = coalesce(fts_matches.row_id, vec_matches.row_id)
                 where tnea.edad between :edad_min and :edad_max
-            "
-            .to_string();
-
-            let mut search_query = SearchQuery::new(&db, &stmt_str);
+            ",
+            );
             search_query.add_bindings(&[
                 &embedding,
                 &query,
@@ -371,7 +369,9 @@ pub async fn search(
             let embedding = query_emb.as_bytes();
             let k: i64 = 1000;
 
-            let stmt_str = "
+            let mut search_query = SearchQuery::new(
+                &db,
+                "
                 with fts_matches as (
                 select
                     rowid as row_id,
@@ -411,10 +411,8 @@ pub async fn search(
                 from combined
                 left join tnea on tnea.id = combined.row_id
                 where tnea.edad between :edad_min and :edad_max
-                "
-            .to_string();
-
-            let mut search_query = SearchQuery::new(&db, &stmt_str);
+                ",
+            );
             search_query.add_bindings(&[
                 &k,
                 &query,
@@ -432,7 +430,7 @@ pub async fn search(
             }
 
             match params.sexo {
-                Sexo::U => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::U]),
+                Sexo::U => (),
                 Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
                 Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
             };
@@ -483,7 +481,9 @@ pub async fn search(
             let embedding = query_emb.as_bytes();
             let k: i64 = 1000;
 
-            let stmt_str = "
+            let mut search_query = SearchQuery::new(
+                &db,
+                "
                 with fts_matches as (
                 select
                     rowid,
@@ -515,10 +515,8 @@ pub async fn search(
                 left join tnea on tnea.id = fts_matches.rowid
                 left join embeddings on embeddings.rowid = fts_matches.rowid
                 where tnea.edad between :edad_min and :edad_max
-            "
-            .to_string();
-
-            let mut search_query = SearchQuery::new(&db, &stmt_str);
+            ",
+            );
             search_query.add_bindings(&[
                 &k,
                 &query,
@@ -536,7 +534,7 @@ pub async fn search(
             }
 
             match params.sexo {
-                Sexo::U => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::U]),
+                Sexo::U => (),
                 Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
                 Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
             };
