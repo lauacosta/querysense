@@ -14,7 +14,8 @@ use crate::{
     sqlite,
     startup::AppState,
     templates::{
-        Fallback, Historial, ReRankDisplay, RrfTable, SearchResponse, Sexo, Table, TneaDisplay,
+        Fallback, Historial, ReRankDisplay, ResponseMarker, RrfTable, SearchResponse, Sexo, Table,
+        TneaDisplay,
     },
 };
 
@@ -230,18 +231,7 @@ pub async fn search(
             let rrf_k: i64 = 60;
             let k: i64 = 1_000;
 
-            let mut bindings: Vec<&dyn ToSql> = vec![
-                &embedding as &dyn ToSql,
-                &query,
-                &k,
-                &weight_fts,
-                &weight_vec,
-                &rrf_k,
-                &params.edad_min,
-                &params.edad_max,
-            ];
-
-            let mut stmt_str = "
+            let stmt_str = "
                 with vec_matches as (
                 select
                     row_id,
@@ -286,17 +276,33 @@ pub async fn search(
             "
             .to_string();
 
+            let mut search_query = SearchQuery::new(&db, &stmt_str);
+            search_query.add_bindings(&[
+                &embedding,
+                &query,
+                &k,
+                &weight_fts,
+                &weight_vec,
+                &rrf_k,
+                &params.edad_min,
+                &params.edad_max,
+            ]);
+
             if !provincia.is_empty() {
-                stmt_str.push_str(" and provincia like :provincia");
-                bindings.push(&provincia as &dyn ToSql);
+                search_query.add_filter(" and tnea.provincia like :provincia", &[&provincia]);
             }
 
             if !ciudad.is_empty() {
-                stmt_str.push_str(" and ciudad like :ciudad");
-                bindings.push(&ciudad as &dyn ToSql);
+                search_query.add_filter(" and tnea.ciudad like :ciudad", &[&ciudad]);
             }
 
-            stmt_str.push_str(
+            match params.sexo {
+                Sexo::U => (),
+                Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
+                Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
+            };
+
+            search_query.push_str(
                 " 
                 order by combined_rank desc
                 ) 
@@ -304,16 +310,7 @@ pub async fn search(
                 ",
             );
 
-            let mut statement = match db.prepare(&stmt_str) {
-                Ok(stmt) => stmt,
-                Err(err) => {
-                    let err = ReportError(err.into());
-                    tracing::error!("{:?}", err);
-                    return Fallback.into();
-                }
-            };
-
-            let mut table = match statement.query_map(&*bindings, |row| {
+            let table = match search_query.execute(|row| {
                 let template: String = row.get(0).unwrap_or_default();
                 let email: String = row.get(1).unwrap_or_default();
                 let provincia: String = row.get(2).unwrap_or_default();
@@ -341,23 +338,8 @@ pub async fn search(
                 );
                 Ok(data)
             }) {
-                Ok(rows) => rows
-                    .collect::<Result<Vec<ReRankDisplay>, _>>()
-                    .unwrap_or_default(),
-                Err(err) => {
-                    let err = ReportError(err.into());
-                    tracing::error!("{:?}", err);
-                    return Fallback.into();
-                }
-            };
-            match params.sexo {
-                Sexo::U => table.retain(|x| (params.edad_min..params.edad_max).contains(&x.edad)),
-                Sexo::M => table.retain(|x| {
-                    x.sexo == Sexo::M && (params.edad_min..params.edad_max).contains(&x.edad)
-                }),
-                Sexo::F => table.retain(|x| {
-                    x.sexo == Sexo::F && (params.edad_min..params.edad_max).contains(&x.edad)
-                }),
+                Ok(rows) => rows,
+                Err(response) => return response,
             };
 
             tracing::info!(
@@ -651,9 +633,10 @@ impl<'a> SearchQuery<'a> {
         self.stmt_str.push_str(stmt);
     }
 
-    fn execute<F>(&self, map_fn: F) -> Result<Vec<TneaDisplay>, SearchResponse>
+    fn execute<F, T>(&self, map_fn: F) -> Result<Vec<T>, SearchResponse>
     where
-        F: Fn(&rusqlite::Row) -> rusqlite::Result<TneaDisplay>,
+        T: ResponseMarker,
+        F: Fn(&rusqlite::Row) -> rusqlite::Result<T>,
     {
         let mut statement = match self.db.prepare(&self.stmt_str) {
             Ok(stmt) => stmt,
@@ -665,9 +648,7 @@ impl<'a> SearchQuery<'a> {
         };
 
         let table = match statement.query_map(&*self.bindings, map_fn) {
-            Ok(rows) => Ok(rows
-                .collect::<Result<Vec<TneaDisplay>, _>>()
-                .unwrap_or_default()),
+            Ok(rows) => Ok(rows.collect::<Result<Vec<T>, _>>().unwrap_or_default()),
             Err(err) => {
                 let err = ReportError(err.into());
                 tracing::error!("{:?}", err);

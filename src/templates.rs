@@ -87,10 +87,9 @@ impl Default for RrfTable {
     }
 }
 
-pub enum TableData {
-    Standard(Vec<TneaDisplay>),
-    Rrf(Vec<ReRankDisplay>),
-}
+pub trait ResponseMarker {}
+impl ResponseMarker for TneaDisplay {}
+impl ResponseMarker for ReRankDisplay {}
 
 #[derive(Debug, Clone, Default)]
 pub struct TneaDisplay {
