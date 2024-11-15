@@ -101,8 +101,8 @@ pub fn sync_fts_tnea(db: &Connection) {
     tracing::info!("Insertando nuevos registros en fts_tnea...");
     db.execute_batch(
         "
-        insert into fts_tnea(rowid, email, edad, sexo, template)
-        select rowid, email, edad, sexo, template
+        insert into fts_tnea(rowid, email, provincia, ciudad, edad, sexo, template)
+        select rowid, email, provincia, ciudad, edad, sexo, template
         from tnea;
 
         insert into fts_tnea(fts_tnea) values('optimize');
@@ -163,16 +163,40 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()
         create table if not exists tnea(
             id integer primary key,
             email text,
+            provincia text,
+            ciudad text,
             edad integer not null,
             sexo text,
             template text
         );
 
-
         create virtual table if not exists fts_tnea using fts5(
-            email, edad, sexo, template,
+            email, edad, provincia, ciudad, sexo, template,
             content='tnea', content_rowid='id'
         );
+
+        create virtual table if not exists fts_historial using fts5(
+            query,
+            content='historial', content_rowid='id'
+        );
+
+        create trigger if not exists after_insert_historial
+        after insert on historial
+        begin
+            insert into fts_historial(rowid, query) values (new.id, new.query);
+        end;
+
+        create trigger if not exists after_update_historial
+        after update on historial
+        begin
+            update fts_historial set query = new.query where rowid = old.id;
+        end;
+
+        create trigger if not exists after_delete_historial
+        after delete on historial
+        begin
+            delete from fts_historial where rowid = old.id;
+        end;
 
         {}
         ",
@@ -244,20 +268,6 @@ pub fn insert_base_data(
         )?;
 
         for data in &tnea_data {
-            let TneaData {
-                email,
-                nombre,
-                sexo,
-                fecha_nacimiento,
-                edad,
-                provincia,
-                ciudad,
-                descripcion,
-                estudios,
-                estudios_mas_recientes,
-                experiencia,
-            } = data;
-
             let clean_html = |str: &str| -> String {
                 if ammonia::is_html(str) {
                     ammonia::clean(str)
@@ -266,19 +276,25 @@ pub fn insert_base_data(
                 }
             };
 
-            let descripcion = clean_html(descripcion);
-            let estudios = clean_html(estudios);
-            let estudios_mas_recientes = clean_html(estudios_mas_recientes);
-            let experiencia = clean_html(experiencia);
+            let normalize = |str: &str| -> String {
+                str.trim_matches(|c| !char::is_ascii_alphabetic(&c))
+                    .to_lowercase()
+                    .replace("province", "")
+            };
+
+            let descripcion = clean_html(&data.descripcion);
+            let estudios = clean_html(&data.estudios);
+            let estudios_mas_recientes = clean_html(&data.estudios_mas_recientes);
+            let experiencia = clean_html(&data.experiencia);
 
             statement.execute((
-                email,
-                nombre,
-                sexo,
-                fecha_nacimiento,
-                edad,
-                provincia,
-                ciudad,
+                &data.email,
+                &data.nombre,
+                &data.sexo,
+                &data.fecha_nacimiento,
+                &data.edad,
+                normalize(&data.provincia),
+                normalize(&data.ciudad),
                 descripcion,
                 estudios,
                 estudios_mas_recientes,
@@ -298,10 +314,10 @@ pub fn insert_base_data(
         let sql_statement = &template.template;
         let mut statement = db.prepare(&format!(
             "
-                    insert into tnea (email, edad, sexo, template)
-                    select email, edad, sexo, {sql_statement} as template
-                    from tnea_raw;
-                    "
+            insert into tnea (email, provincia, ciudad, edad, sexo, template)
+            select email, provincia, ciudad, edad, sexo, {sql_statement} as template
+            from tnea_raw;
+            "
         ))?;
 
         let inserted = statement.execute(rusqlite::params![])

@@ -47,9 +47,11 @@ pub async fn search(
                 "select
                     rank as score, 
                     email, 
+                    provincia,
+                    ciudad,
                     edad, 
                     sexo, 
-                    highlight(fts_tnea, 3, '<b style=\"color: green;\">', '</b>') as template,
+                    highlight(fts_tnea, 5, '<b style=\"color: green;\">', '</b>') as template,
                     'fts' as match_type
                 from fts_tnea
                 where template match :query
@@ -66,12 +68,16 @@ pub async fn search(
             let mut rows = match statement.query_map(&[(":query", &params.query)], |row| {
                 let score = row.get::<_, f32>(0).unwrap_or_default() * -1.;
                 let email: String = row.get(1).unwrap_or_default();
-                let edad: u64 = row.get(2).unwrap_or_default();
-                let sexo: Sexo = row.get(3).unwrap_or_default();
-                let template: String = row.get(4).unwrap_or_default();
-                let match_type: String = row.get(5).unwrap_or_default();
+                let provincia: String = row.get(2).unwrap_or_default();
+                let ciudad: String = row.get(3).unwrap_or_default();
+                let edad: u64 = row.get(4).unwrap_or_default();
+                let sexo: Sexo = row.get(5).unwrap_or_default();
+                let template: String = row.get(6).unwrap_or_default();
+                let match_type: String = row.get(7).unwrap_or_default();
 
-                let data = TneaDisplay::new(email, edad, sexo, template, score, match_type);
+                let data = TneaDisplay::new(
+                    email, provincia, ciudad, edad, sexo, template, score, match_type,
+                );
                 Ok(data)
             }) {
                 Ok(rows) => rows
@@ -106,6 +112,8 @@ pub async fn search(
                 select
                     vec_tnea.distance,
                     tnea.email,
+                    tnea.provincia,
+                    tnea.ciudad,
                     tnea.edad,
                     tnea.sexo,
                     tnea.template,
@@ -127,12 +135,16 @@ pub async fn search(
                 match statement.query_map(&[(":embedding", query_emb.as_bytes())], |row| {
                     let score = row.get::<_, f32>(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
-                    let edad: u64 = row.get(2).unwrap_or_default();
-                    let sexo: Sexo = row.get(3).unwrap_or_default();
-                    let template: String = row.get(4).unwrap_or_default();
-                    let match_type: String = row.get(5).unwrap_or_default();
+                    let provincia: String = row.get(2).unwrap_or_default();
+                    let ciudad: String = row.get(3).unwrap_or_default();
+                    let edad: u64 = row.get(4).unwrap_or_default();
+                    let sexo: Sexo = row.get(5).unwrap_or_default();
+                    let template: String = row.get(6).unwrap_or_default();
+                    let match_type: String = row.get(7).unwrap_or_default();
 
-                    let data = TneaDisplay::new(email, edad, sexo, template, score, match_type);
+                    let data = TneaDisplay::new(
+                        email, provincia, ciudad, edad, sexo, template, score, match_type,
+                    );
 
                     Ok(data)
                 }) {
@@ -196,6 +208,8 @@ pub async fn search(
                 select
                     tnea.template,
                     tnea.email,
+                    tnea.provincia, 
+                    tnea.ciudad,
                     tnea.edad,
                     tnea.sexo,
                     vec_matches.rank_number as vec_rank,
@@ -226,16 +240,18 @@ pub async fn search(
                 |row| {
                     let template: String = row.get(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
-                    let edad: u64 = row.get(2).unwrap_or_default();
-                    let sexo: Sexo = row.get(3).unwrap_or_default();
-                    let vec_rank: i64= row.get(4).unwrap_or_default();
-                    let fts_rank: i64= row.get(5).unwrap_or_default();
-                    let combined_rank: f32 = row.get(6).unwrap_or_default();
-                    let vec_score: f32= row.get(7).unwrap_or_default();
-                    let fts_score = row.get::<_, f32>(8).unwrap_or_default() * -1.;
+                    let provincia: String = row.get(2).unwrap_or_default();
+                    let ciudad: String = row.get(3).unwrap_or_default();
+                    let edad: u64 = row.get(4).unwrap_or_default();
+                    let sexo: Sexo = row.get(5).unwrap_or_default();
+                    let vec_rank: i64= row.get(6).unwrap_or_default();
+                    let fts_rank: i64= row.get(7).unwrap_or_default();
+                    let combined_rank: f32 = row.get(8).unwrap_or_default();
+                    let vec_score: f32= row.get(9).unwrap_or_default();
+                    let fts_score = row.get::<_, f32>(10).unwrap_or_default() * -1.;
 
 
-                    let data = ReRankDisplay::new(template,email, edad, sexo, fts_rank, vec_rank, combined_rank, vec_score, fts_score);
+                    let data = ReRankDisplay::new(template,email,provincia, ciudad, edad, sexo, fts_rank, vec_rank, combined_rank, vec_score, fts_score);
                     Ok(data)
                 },
             ) {
@@ -299,6 +315,8 @@ pub async fn search(
                 select distinct
                     tnea.template,
                     tnea.email,
+                    tnea.provincia,
+                    tnea.ciudad,
                     tnea.edad,
                     tnea.sexo,
                     combined.score,
@@ -321,12 +339,14 @@ pub async fn search(
                 |row| {
                     let template: String = row.get(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
-                    let edad: u64 = row.get(2).unwrap_or_default();
-                    let sexo: Sexo= row.get(3).unwrap_or_default();
-                    let score: f32 = row.get(4).unwrap_or_default();
-                    let match_type: String = row.get(5).unwrap_or_default();
+                    let provincia: String = row.get(2).unwrap_or_default();
+                    let ciudad: String = row.get(3).unwrap_or_default();
+                    let edad: u64 = row.get(4).unwrap_or_default();
+                    let sexo: Sexo= row.get(5).unwrap_or_default();
+                    let score: f32 = row.get(6).unwrap_or_default();
+                    let match_type: String = row.get(7).unwrap_or_default();
 
-                    let data = TneaDisplay::new(email, edad, sexo, template, score, match_type);
+                    let data = TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score, match_type);
                     Ok(data)
                 },
             ) {
@@ -380,6 +400,8 @@ pub async fn search(
                 select
                     tnea.template,
                     tnea.email,
+                    tnea.provincia,
+                    tnea.ciudad,
                     tnea.edad,
                     tnea.sexo,
                     fts_matches.score,
@@ -404,12 +426,14 @@ pub async fn search(
                 |row| {
                     let template: String = row.get(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
-                    let edad: u64= row.get(2).unwrap_or_default();
-                    let sexo:Sexo = row.get(3).unwrap_or_default();
-                let score = row.get::<_, f32>(4).unwrap_or_default() * -1.;
-                    let match_type: String = row.get(5).unwrap_or_default();
+                    let provincia: String = row.get(2).unwrap_or_default();
+                    let ciudad: String = row.get(3).unwrap_or_default();
+                    let edad: u64= row.get(4).unwrap_or_default();
+                    let sexo:Sexo = row.get(5).unwrap_or_default();
+                let score = row.get::<_, f32>(6).unwrap_or_default() * -1.;
+                    let match_type: String = row.get(7).unwrap_or_default();
 
-                    let data = TneaDisplay::new(email, edad, sexo, template, score, match_type);
+                    let data = TneaDisplay::new(email, provincia, ciudad,edad, sexo, template, score, match_type);
                     Ok(data)
                 },
             ) {

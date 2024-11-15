@@ -68,6 +68,8 @@ pub enum TableData {
 #[derive(Debug, Clone, Default)]
 pub struct TneaDisplay {
     email: String,
+    provincia: String,
+    ciudad: String,
     pub edad: u64,
     pub sexo: Sexo,
     template: String,
@@ -79,6 +81,8 @@ impl TneaDisplay {
     #[must_use]
     pub fn new(
         email: String,
+        provincia: String,
+        ciudad: String,
         edad: u64,
         sexo: Sexo,
         template: String,
@@ -87,6 +91,8 @@ impl TneaDisplay {
     ) -> Self {
         Self {
             email,
+            provincia,
+            ciudad,
             edad,
             sexo,
             template,
@@ -100,6 +106,9 @@ impl TneaDisplay {
 pub struct ReRankDisplay {
     template: String,
     email: String,
+
+    provincia: String,
+    ciudad: String,
     pub edad: u64,
     pub sexo: Sexo,
     fts_rank: i64,
@@ -114,6 +123,8 @@ impl ReRankDisplay {
     pub fn new(
         template: String,
         email: String,
+        provincia: String,
+        ciudad: String,
         edad: u64,
         sexo: Sexo,
         fts_rank: i64,
@@ -125,6 +136,8 @@ impl ReRankDisplay {
         Self {
             template,
             email,
+            provincia,
+            ciudad,
             edad,
             sexo,
             fts_rank,

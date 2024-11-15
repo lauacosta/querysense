@@ -67,11 +67,19 @@ fn main() -> eyre::Result<()> {
             let db = sqlite::init_sqlite()?;
 
             if hard {
-                let exists: String = db.query_row(
+                let exists: String = match db.query_row(
                     "select name from sqlite_master where type='table' and name=?",
                     ["tnea"],
                     |row| row.get(0),
-                )?;
+                ) {
+                    Ok(msg) => msg,
+                    Err(err) => {
+                        return Err(eyre::eyre!(
+                            "Es probable que la base de datos no esté creada. err: {}",
+                            err
+                        ))
+                    }
+                };
 
                 if !exists.is_empty() {
                     db.execute("drop table tnea", [])?;

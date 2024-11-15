@@ -153,11 +153,24 @@ function initForm() {
 		return;
 	}
 	document.getElementById("search-input").value = searchConfig.query;
-	document.getElementById("strategy").value = searchConfig.strategy;
 	document.getElementById("age_min").value = searchConfig.edad_min;
 	document.getElementById("age_max").value = searchConfig.edad_max;
 
-	document.getElementById("balanceSlider").value = searchConfig.peso_fts || 50;
+	let strategy = document.getElementById("strategy");
+	strategy.value = searchConfig.strategy;
+
+	let balance_slider = document.getElementById("balanceSlider");
+	balance_slider.value = searchConfig.peso_fts || 50;
+	balance_slider.disabled = true;
+
+	strategy.addEventListener("change", () => {
+		if (strategy.value === "HybridRrf") {
+			balance_slider.disabled = false;
+		} else {
+			balance_slider.disabled = true;
+		}
+	});
+
 	document.getElementById("value1Display").textContent = searchConfig.peso_fts;
 	document.getElementById("value2Display").textContent =
 		searchConfig.peso_semantic;
