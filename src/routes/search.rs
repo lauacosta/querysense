@@ -584,6 +584,7 @@ pub async fn search(
     }
 }
 
+#[instrument(name = "Actualizando el historial", skip(db))]
 fn update_historial(
     db: &rusqlite::Connection,
     query: &str,
