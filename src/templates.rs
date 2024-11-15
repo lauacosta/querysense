@@ -74,7 +74,6 @@ pub struct TneaDisplay {
     pub sexo: Sexo,
     template: String,
     pub score: f32,
-    match_type: String,
 }
 
 impl TneaDisplay {
@@ -87,7 +86,6 @@ impl TneaDisplay {
         sexo: Sexo,
         template: String,
         score: f32,
-        match_type: String,
     ) -> Self {
         Self {
             email,
@@ -97,7 +95,6 @@ impl TneaDisplay {
             sexo,
             template,
             score,
-            match_type,
         }
     }
 }

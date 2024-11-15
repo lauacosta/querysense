@@ -73,11 +73,8 @@ pub async fn search(
                 let edad: u64 = row.get(4).unwrap_or_default();
                 let sexo: Sexo = row.get(5).unwrap_or_default();
                 let template: String = row.get(6).unwrap_or_default();
-                let match_type: String = row.get(7).unwrap_or_default();
 
-                let data = TneaDisplay::new(
-                    email, provincia, ciudad, edad, sexo, template, score, match_type,
-                );
+                let data = TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
                 Ok(data)
             }) {
                 Ok(rows) => rows
@@ -140,11 +137,9 @@ pub async fn search(
                     let edad: u64 = row.get(4).unwrap_or_default();
                     let sexo: Sexo = row.get(5).unwrap_or_default();
                     let template: String = row.get(6).unwrap_or_default();
-                    let match_type: String = row.get(7).unwrap_or_default();
 
-                    let data = TneaDisplay::new(
-                        email, provincia, ciudad, edad, sexo, template, score, match_type,
-                    );
+                    let data =
+                        TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
 
                     Ok(data)
                 }) {
@@ -344,9 +339,8 @@ pub async fn search(
                     let edad: u64 = row.get(4).unwrap_or_default();
                     let sexo: Sexo= row.get(5).unwrap_or_default();
                     let score: f32 = row.get(6).unwrap_or_default();
-                    let match_type: String = row.get(7).unwrap_or_default();
 
-                    let data = TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score, match_type);
+                    let data = TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
                     Ok(data)
                 },
             ) {
@@ -430,10 +424,9 @@ pub async fn search(
                     let ciudad: String = row.get(3).unwrap_or_default();
                     let edad: u64= row.get(4).unwrap_or_default();
                     let sexo:Sexo = row.get(5).unwrap_or_default();
-                let score = row.get::<_, f32>(6).unwrap_or_default() * -1.;
-                    let match_type: String = row.get(7).unwrap_or_default();
+                    let score = row.get::<_, f32>(6).unwrap_or_default() * -1.;
 
-                    let data = TneaDisplay::new(email, provincia, ciudad,edad, sexo, template, score, match_type);
+                    let data = TneaDisplay::new(email, provincia, ciudad,edad, sexo, template, score );
                     Ok(data)
                 },
             ) {

@@ -32,7 +32,6 @@
                     <th scope="col">Provincia</th>
                     <th scope="col">Ciudad</th>
                     <th scope="col">Template</th>
-                    <th scope="col">Estrategia</th>
                 </tr>
             </thead>
             <tbody>
@@ -45,7 +44,6 @@
                     <td> {{ row.provincia }} </td> 
                     <td> {{ row.ciudad }} </td> 
                     <td> {{ row.template|safe }} </td> 
-                    <td> {{ row.match_type }} </td>
                 </tr>
                 {% endfor %} 
             </tbody>

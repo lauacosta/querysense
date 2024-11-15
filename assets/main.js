@@ -149,19 +149,19 @@ function initCsv() {
  */
 function initForm() {
 	const searchConfig = getUrlParams();
+
+	let balance_slider = document.getElementById("balanceSlider");
+	balance_slider.disabled = true;
+
 	if (Object.keys(searchConfig).length === 0) {
 		return;
 	}
 	document.getElementById("search-input").value = searchConfig.query;
 	document.getElementById("age_min").value = searchConfig.edad_min;
 	document.getElementById("age_max").value = searchConfig.edad_max;
-
 	let strategy = document.getElementById("strategy");
 	strategy.value = searchConfig.strategy;
-
-	let balance_slider = document.getElementById("balanceSlider");
 	balance_slider.value = searchConfig.peso_fts || 50;
-	balance_slider.disabled = true;
 
 	strategy.addEventListener("change", () => {
 		if (strategy.value === "HybridRrf") {

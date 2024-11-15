@@ -1,8 +1,5 @@
 /target
-/meili_data
 /scripts
-meilisearch
-data.ms
 *.sqlite3
 .env
 querysense.db
