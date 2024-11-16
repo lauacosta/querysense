@@ -21,8 +21,9 @@ body {
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
 }
 
-.sidebar {
-    width: 250px;
+aside.sidebar {
+    width: 300px;
+    height: 100vh;
     background-color: #f7f7f7;
     padding: 20px;
     border-right: 1px solid #ddd;
@@ -30,7 +31,7 @@ body {
     overflow-x: auto;
 }
 
-.sidebar h2 {
+aside.sidebar h2 {
     margin-bottom: 15px;
 }
 
@@ -251,6 +252,7 @@ button:active {
 }
 
 .search-group {
+    position: relative;
     margin-bottom: 15px;
 }
 
@@ -258,6 +260,7 @@ label {
     display: block;
     margin-bottom: 5px;
     font-weight: bold;
+    position: relative;
 }
 
 input[type="text"],
@@ -294,4 +297,50 @@ select {
 
 .slider-value {
     font-weight: bold;
+}
+
+.error-message {
+    color: red;
+    font-size: 14px;
+    margin-top: 5px;
+    display: none;
+}
+
+.help-icon {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    cursor: help;
+    color: #666;
+}
+
+.search-tooltip {
+    visibility: hidden;
+    width: 500px;
+    background-color: #555;
+    color: #fff;
+    text-align: left;
+    border-radius: 6px;
+    padding: 10px;
+    position: absolute;
+    z-index: 1;
+    bottom: 120%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-left: -100px;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.help-icon:hover .search-tooltip {
+    visibility: visible;
+    opacity: 1;
+}
+
+.error-message {
+    color: red;
+    font-size: 14px;
+    margin-top: 5px;
+    display: none;
 }

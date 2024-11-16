@@ -46,24 +46,7 @@ pub async fn search(
     };
     let db = app.db.lock().await;
 
-    let (query, provincia, ciudad) =
-        if let Some((query, filters)) = params.search_str.split_once('|') {
-            if let Some((provincia, ciudad)) = filters.split_once(',') {
-                (
-                    sqlite::normalize(query),
-                    sqlite::normalize(provincia),
-                    sqlite::normalize(ciudad),
-                )
-            } else {
-                (sqlite::normalize(query), String::new(), String::new())
-            }
-        } else {
-            (
-                sqlite::normalize(&params.search_str),
-                String::new(),
-                String::new(),
-            )
-        };
+    let (query, provincia, ciudad) = parse_search_str(&params.search_str);
 
     match params.strategy {
         SearchStrategy::Fts => {
@@ -651,5 +634,27 @@ impl<'a> SearchQuery<'a> {
         };
 
         table
+    }
+}
+
+fn parse_search_str(search_str: &str) -> (String, String, String) {
+    if let Some((query, filters)) = search_str.split_once('|') {
+        if let Some((provincia, ciudad)) = filters.split_once(',') {
+            let provincia = format!("%{provincia}%");
+            let ciudad = format!("%{ciudad}%");
+            (
+                sqlite::normalize(query),
+                sqlite::normalize(&provincia),
+                sqlite::normalize(&ciudad),
+            )
+        } else {
+            (
+                sqlite::normalize(query),
+                sqlite::normalize(filters),
+                String::new(),
+            )
+        }
+    } else {
+        (sqlite::normalize(search_str), String::new(), String::new())
     }
 }

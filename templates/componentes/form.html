@@ -1,9 +1,15 @@
 {% macro busqueda(url) %}
 <div class="form-container">
-    <form action="/{{ url }}" method="GET" class="search-form">
+    <form action="/{{ url }}" method="GET" class="search-form" id="search-form">
         <div class="search-group">
-            <label for="search">Búsqueda:</label>
+            <label for="search">Búsqueda:
+                <span class="help-icon">
+                    &#9432;
+                    <span class="search-tooltip">El formato es "query | provincia, ciudad", los campos provincia y ciudad son opcionales.</span>
+                </span>
+            </label>
             <input type="text" class="search-input" id="search-input" placeholder="Ingresa tu busqueda..." name="query" required>
+            
         </div>
         <div class="search-group">
         <label for="strategy">Método de Búsqueda:</label>

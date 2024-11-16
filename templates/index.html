@@ -15,9 +15,14 @@
     <div class="middle">
         <div class="search-container">
         <h1>Querysense</h1>
-        <form action="/search" method="GET">
+        <form action="/search" method="GET" id="search-form">
             <div class="search-group">
-                <label for="search">Búsqueda:</label>
+                <label for="search">Búsqueda:
+                    <span class="help-icon">
+                        &#9432;
+                        <span class="search-tooltip">El formato es "query | provincia, ciudad", los campos provincia y ciudad son opcionales.</span>
+                    </span>
+                </label>
                 <input type="text" id="search-input" name="query" placeholder="Ingresa tu búsqueda..." required>
             </div>
             
