@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::sync::{Arc, Mutex};
 
 use futures::StreamExt;
 use rusqlite::{ffi::sqlite3_auto_extension, Connection};
@@ -38,9 +35,7 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
 
     tracing::info!("Generando embeddings...");
 
-    let client = reqwest::ClientBuilder::new()
-        .timeout(Duration::from_secs(5))
-        .build()?;
+    let client = reqwest::ClientBuilder::new().build()?;
 
     let jh = templates.chunks(chunk_size).map(|chunk| match model {
         #[cfg(feature = "local")]
@@ -70,7 +65,7 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
                         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
                     );
                     for (id, embedding) in data {
-                        tracing::debug!("{id} - {embedding:?}");
+                        // tracing::debug!("{id} - {embedding:?}");
                         statement.execute(
                             rusqlite::params![id, embedding.as_bytes()],
                         ).expect("Error inserting into vec_tnea");
@@ -80,7 +75,7 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
                         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
                     );
                 }
-                Err(err) => eprintln!("Error processing chunk: {}", err),
+                Err(err) => tracing::error!("Error processing chunk: {}", err),
             }
         }
     }).await;

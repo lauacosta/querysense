@@ -92,10 +92,9 @@ pub async fn search(
                 search_query.add_filter(" and ciudad like :ciudad", &[&ciudad]);
             }
 
-            let sexo = params.sexo;
-            match sexo {
-                Sexo::M => search_query.add_filter(" and sexo = :sexo", &[&sexo]),
-                Sexo::F => search_query.add_filter(" and sexo = :sexo", &[&sexo]),
+            match params.sexo {
+                Sexo::M => search_query.add_filter(" and sexo = :sexo", &[&params.sexo]),
+                Sexo::F => search_query.add_filter(" and sexo = :sexo", &[&params.sexo]),
                 Sexo::U => (),
             };
 
@@ -175,9 +174,9 @@ pub async fn search(
             }
 
             match params.sexo {
+                Sexo::M => search_query.add_filter(" and sexo = :sexo", &[&params.sexo]),
+                Sexo::F => search_query.add_filter(" and sexo = :sexo", &[&params.sexo]),
                 Sexo::U => (),
-                Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
-                Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
             };
 
             let table = match search_query.execute(|row| {
@@ -222,6 +221,7 @@ pub async fn search(
                 .await
                 .map_err(|err| tracing::error!("{err}"))
                 .expect("Fallo al crear un embedding del query");
+
             let embedding = query_emb.as_bytes();
             // Normalizo los datos que estan en un rango de 0 a 100 para que esten de 0 a 1.
             let weight_vec = params.peso_semantic / 100.0;
@@ -277,11 +277,11 @@ pub async fn search(
             );
             search_query.add_bindings(&[
                 &embedding,
-                &query,
                 &k,
+                &query,
+                &rrf_k,
                 &weight_fts,
                 &weight_vec,
-                &rrf_k,
                 &params.edad_min,
                 &params.edad_max,
             ]);
@@ -295,9 +295,9 @@ pub async fn search(
             }
 
             match params.sexo {
+                Sexo::M => search_query.add_filter(" and sexo = :sexo", &[&params.sexo]),
+                Sexo::F => search_query.add_filter(" and sexo = :sexo", &[&params.sexo]),
                 Sexo::U => (),
-                Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
-                Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
             };
 
             search_query.push_str(
@@ -414,8 +414,8 @@ pub async fn search(
                 ",
             );
             search_query.add_bindings(&[
-                &k,
                 &query,
+                &k,
                 &embedding,
                 &params.edad_min,
                 &params.edad_max,
@@ -430,9 +430,9 @@ pub async fn search(
             }
 
             match params.sexo {
+                Sexo::M => search_query.add_filter(" and sexo = :sexo", &[&params.sexo]),
+                Sexo::F => search_query.add_filter(" and sexo = :sexo", &[&params.sexo]),
                 Sexo::U => (),
-                Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
-                Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
             };
 
             search_query.push_str(" ) select * from final;");
@@ -517,13 +517,7 @@ pub async fn search(
                 where tnea.edad between :edad_min and :edad_max
             ",
             );
-            search_query.add_bindings(&[
-                &k,
-                &query,
-                &embedding,
-                &params.edad_min,
-                &params.edad_max,
-            ]);
+            search_query.add_bindings(&[&query, &k, &params.edad_min, &params.edad_max]);
 
             if !provincia.is_empty() {
                 search_query.add_filter(" and tnea.provincia like :provincia", &[&provincia]);
@@ -534,15 +528,16 @@ pub async fn search(
             }
 
             match params.sexo {
+                Sexo::M => search_query.add_filter(" and sexo = :sexo", &[&params.sexo]),
+                Sexo::F => search_query.add_filter(" and sexo = :sexo", &[&params.sexo]),
                 Sexo::U => (),
-                Sexo::F => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::F]),
-                Sexo::M => search_query.add_filter(" and tnea.sexo like :sexo", &[&Sexo::M]),
             };
 
-            search_query.push_str(
+            search_query.add_filter(
                 " order by vec_distance_cosine(:embedding, embeddings.template_embedding)
                 )
                 select * from final;",
+                &[&embedding],
             );
 
             let rows = match search_query.execute(|row| {
