@@ -6,7 +6,7 @@ querysense.db
 /configuration
 /dist
 /sql
-/csv
+/datasources
 /backup
 /node_modules
 bun.lockb

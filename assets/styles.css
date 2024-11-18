@@ -253,7 +253,9 @@ button:active {
 
 .search-group {
     position: relative;
-    margin-bottom: 15px;
+    flex-direction: column;
+    padding-top: 15px;
+    /* margin-bottom: 15px; */
 }
 
 label {

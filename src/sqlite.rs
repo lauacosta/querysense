@@ -234,7 +234,7 @@ pub fn insert_base_data(
         return Ok(());
     }
 
-    let tnea_data: Vec<TneaData> = utils::parse_and_embed("./csv/", template)?;
+    let tnea_data: Vec<TneaData> = utils::parse_and_embed("./datasources/", template)?;
 
     tracing::info!("Abriendo transacción para insertar datos en la tabla `tnea_raw` y `tnea`!");
 
