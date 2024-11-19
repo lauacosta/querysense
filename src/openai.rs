@@ -66,14 +66,13 @@ async fn request_embeddings(
         .bearer_auth(token)
         .json(&request)
         .send()
-        .await?
-        .error_for_status()?;
+        .await?;
 
     match response.status() {
         status if status.is_success() => Ok(response),
         status if status.as_u16() == 429 => {
             if attempt >= max_retries {
-                tracing::error!("El maximo numero de intentos fue excecido bajo rate limit");
+                tracing::error!("El maximo numero de intentos fue excedido bajo rate limit");
                 Err(EmbeddingError::MaxRetriesExceeded)
             } else {
                 tracing::error!("Rate limit excedido, volviendo a intentar...");

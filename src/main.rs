@@ -11,8 +11,7 @@ use tracing_tree::HierarchicalLayer;
 fn main() -> eyre::Result<()> {
     color_eyre::install()?;
     dotenvy::dotenv()
-        .map_err(|err| eyre::eyre!("El archivo .env no fue encontrado. err: {}", err))
-        .unwrap();
+        .map_err(|err| eyre::eyre!("El archivo .env no fue encontrado. err: {}", err))?;
 
     let cli = Cli::parse();
     let level = match cli.loglevel.to_lowercase().trim() {

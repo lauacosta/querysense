@@ -2,7 +2,10 @@ use std::{
     fs::File,
     io::BufReader,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
 };
 
 use futures::StreamExt;
@@ -35,12 +38,14 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
         Err(err) => return Err(eyre::eyre!(err)),
     };
 
-    let inserted = Arc::new(Mutex::new(0));
     let chunk_size = 2048;
 
     tracing::info!("Generando embeddings...");
 
-    let client = reqwest::ClientBuilder::new().build()?;
+    let client = reqwest::ClientBuilder::new()
+        .deflate(true)
+        .gzip(true)
+        .build()?;
 
     let jh = templates.chunks(chunk_size).map(|chunk| match model {
         #[cfg(feature = "local")]
@@ -58,8 +63,10 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
     let start = std::time::Instant::now();
     tracing::info!("Insertando nuevas columnas en vec_tnea...");
 
-    stream.for_each_concurrent(Some(10), |future| {
-        let inserted = Arc::clone(&inserted);
+    let total_inserted = Arc::new(AtomicUsize::new(0));
+
+    stream.for_each_concurrent(Some(5), |future| {
+        let total_inserted = total_inserted.clone();
         async move {
             match future.await {
                 Ok(data) => {
@@ -69,16 +76,19 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
                     db.execute("BEGIN TRANSACTION", []).expect(
                         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
                     );
+                    let mut insertions = 0;
                     for (id, embedding) in data {
                         // tracing::debug!("{id} - {embedding:?}");
-                        statement.execute(
+                        insertions += statement.execute(
                             rusqlite::params![id, embedding.as_bytes()],
-                        ).expect("Error inserting into vec_tnea");
-                        *inserted.lock().unwrap() += 1;
+                        ).expect("Error insertando en vec_tnea");
+
                     }
                     db.execute("COMMIT", []).expect(
                         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
                     );
+
+                    total_inserted.fetch_add(insertions, Ordering::Relaxed);
                 }
                 Err(err) => tracing::error!("Error procesando el chunk: {}", err),
             }
@@ -87,7 +97,7 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
 
     tracing::info!(
         "Insertando nuevos registros en vec_tnea... se insertaron {} registros, en {} ms",
-        inserted.lock().unwrap(),
+        total_inserted.load(Ordering::Relaxed),
         start.elapsed().as_millis()
     );
 

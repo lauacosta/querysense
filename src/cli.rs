@@ -34,7 +34,7 @@ pub enum Commands {
         #[arg(value_enum, short = 'S', long, default_value_t = SyncStrategy::Fts)]
         sync_strat: SyncStrategy,
 
-        /// Determina si utilizar un modelo local (actualmente es distilBERT) o remoto (Actualmente solo es "text-embedding-3-small").
+        /// Determina si utilizar un modelo local o remoto (Actualmente solo es "text-embedding-3-small").
         #[arg(value_enum, short = 'M', long, default_value_t = Model::OpenAI)]
         model: Model,
     },
