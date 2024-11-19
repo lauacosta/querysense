@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -36,6 +38,57 @@ pub struct RequestBody {
     pub dimensions: Option<u64>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum EmbeddingError {
+    #[error("Request falló: {0}")]
+    RequestError(#[from] reqwest::Error),
+    #[error("Rate limit excecido")]
+    RateLimit,
+    #[error("Maximo número de intentos excedido")]
+    MaxRetriesExceeded,
+}
+
+async fn request_embeddings(
+    client: &reqwest::Client,
+    token: &str,
+    request: &RequestBody,
+    attempt: u32,
+    max_retries: u32,
+) -> Result<reqwest::Response, EmbeddingError> {
+    if attempt > 0 {
+        tracing::warn!("Itento {} of {}", attempt, max_retries);
+        let delay = Duration::from_millis(1000 * 2u64.pow(attempt - 1));
+        tokio::time::sleep(delay).await;
+    }
+
+    let response = client
+        .post("https://api.openai.com/v1/embeddings")
+        .bearer_auth(token)
+        .json(&request)
+        .send()
+        .await?
+        .error_for_status()?;
+
+    match response.status() {
+        status if status.is_success() => Ok(response),
+        status if status.as_u16() == 429 => {
+            if attempt >= max_retries {
+                tracing::error!("El maximo numero de intentos fue excecido bajo rate limit");
+                Err(EmbeddingError::MaxRetriesExceeded)
+            } else {
+                tracing::error!("Rate limit excedido, volviendo a intentar...");
+                Err(EmbeddingError::RateLimit)
+            }
+        }
+        status => {
+            tracing::error!("El request ha fallado con status: {status}");
+            Err(EmbeddingError::RequestError(
+                response.error_for_status().unwrap_err(),
+            ))
+        }
+    }
+}
+
 // https://community.openai.com/t/does-the-index-field-on-an-embedding-response-correlate-to-the-index-of-the-input-text-it-was-generated-from/526099
 #[instrument(name = "Generando Embeddings", skip(input, client, indices))]
 pub async fn embed_vec(
@@ -53,17 +106,28 @@ pub async fn embed_vec(
     };
 
     let token = std::env::var("OPENAI_KEY").expect("`OPENAI_KEY debería estar definido en el .env");
-    let req_start = std::time::Instant::now();
-    tracing::info!("Enviando request a Open AI...");
-    let response = client
-        .post("https://api.openai.com/v1/embeddings")
-        .bearer_auth(token)
-        .json(&request)
-        .send()
-        .await?
-        .error_for_status()?;
 
-    tracing::info!("El request tomó {} ms", req_start.elapsed().as_millis());
+    const MAX_INTENTOS: u32 = 3;
+    let mut intento = 0;
+    let mut response = None;
+
+    while intento <= MAX_INTENTOS {
+        let req_start = std::time::Instant::now();
+        tracing::info!("Enviando request a Open AI...");
+        match request_embeddings(client, &token, &request, intento, MAX_INTENTOS).await {
+            Ok(resp) => {
+                tracing::info!("El request tomó {} ms", req_start.elapsed().as_millis());
+                response = Some(resp);
+                break;
+            }
+            Err(EmbeddingError::RateLimit) => {
+                intento += 1;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+
+    let response = response.ok_or(EmbeddingError::MaxRetriesExceeded)?;
 
     let start = std::time::Instant::now();
 
@@ -80,7 +144,6 @@ pub async fn embed_vec(
         EmbeddingObject::embeddings_iter(response.embeddings),
     )
     .collect();
-
     tracing::info!(
         "La conversión de Vec<EmbeddingObject> a Vec<Vec<f32>> tomó {} ms",
         start.elapsed().as_millis()
@@ -90,9 +153,9 @@ pub async fn embed_vec(
         "Embedding generado correctamente! en total tomó {} ms",
         global_start.elapsed().as_millis()
     );
-
     Ok(embedding)
 }
+
 #[instrument(name = "Generando embedding del query", skip(input, client))]
 pub async fn embed_single(input: String, client: &reqwest::Client) -> eyre::Result<Vec<f32>> {
     let global_start = std::time::Instant::now();

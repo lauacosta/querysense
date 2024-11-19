@@ -1,4 +1,9 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    fs::File,
+    io::BufReader,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 
 use futures::StreamExt;
 use rusqlite::{ffi::sqlite3_auto_extension, Connection};
@@ -44,7 +49,6 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
             let indices: Vec<u64> = chunk.iter().map(|(id, _)| *id).collect();
             let templates: Vec<String> =
                 chunk.iter().map(|(_, template)| template.clone()).collect();
-
             openai::embed_vec(indices, templates, &client)
         }
     });
@@ -54,13 +58,14 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
     let start = std::time::Instant::now();
     tracing::info!("Insertando nuevas columnas en vec_tnea...");
 
-    stream.for_each_concurrent(Some(5), |future| {
+    stream.for_each_concurrent(Some(10), |future| {
         let inserted = Arc::clone(&inserted);
         async move {
             match future.await {
                 Ok(data) => {
                     let mut statement =
                         db.prepare("insert into vec_tnea(row_id, template_embedding) values (?,?)").unwrap();
+
                     db.execute("BEGIN TRANSACTION", []).expect(
                         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
                     );
@@ -75,7 +80,7 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
                         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
                     );
                 }
-                Err(err) => tracing::error!("Error processing chunk: {}", err),
+                Err(err) => tracing::error!("Error procesando el chunk: {}", err),
             }
         }
     }).await;
@@ -124,6 +129,7 @@ pub fn init_sqlite() -> eyre::Result<rusqlite::Connection> {
     })?;
     Ok(rusqlite::Connection::open(path)?)
 }
+
 pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()> {
     let (sqlite_version, vec_version): (String, String) =
         db.query_row("select sqlite_version(), vec_version()", [], |row| {
@@ -227,103 +233,150 @@ pub fn insert_base_data(
     template: &configuration::Template,
 ) -> eyre::Result<()> {
     let num: usize = db.query_row("select count(*) from tnea", [], |row| row.get(0))?;
-
-    // TODO: Añadir la condicion de que caduquen los datos.
     if num != 0 {
         tracing::info!("La tabla `tnea` existe y tiene {num} registros.");
         return Ok(());
     }
 
-    let tnea_data: Vec<TneaData> = utils::parse_and_embed("./datasources/", template)?;
+    let start = std::time::Instant::now();
+    let inserted = parse_and_insert("./datasources/", template, db)?;
+    tracing::info!(
+        "Se insertaron {inserted} columnas en tnea_raw! en {} ms",
+        start.elapsed().as_millis()
+    );
 
-    tracing::info!("Abriendo transacción para insertar datos en la tabla `tnea_raw` y `tnea`!");
-
+    let start = std::time::Instant::now();
     db.execute("BEGIN TRANSACTION", []).expect(
         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
     );
 
-    let mut inserted: usize = 0;
-    {
-        let start = std::time::Instant::now();
-        let mut statement = db.prepare(
-            "
-                    insert into tnea_raw (
-                        email,
-                        nombre,
-                        sexo,
-                        fecha_nacimiento,
-                        edad,
-                        provincia,
-                        ciudad,
-                        descripcion,
-                        estudios,
-                        estudios_mas_recientes,
-                        experiencia
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )?;
+    let sql_statement = &template.template;
+    let mut statement = db.prepare(&format!(
+        "
+        insert into tnea (email, provincia, ciudad, edad, sexo, template)
+        select email, provincia, ciudad, edad, sexo, {sql_statement} as template
+        from tnea_raw;
+        "
+    ))?;
 
-        for data in &tnea_data {
-            let clean_html = |str: &str| -> String {
-                if ammonia::is_html(str) {
-                    ammonia::clean(str)
-                } else {
-                    str.to_string()
-                }
-            };
-
-            let descripcion = clean_html(&data.descripcion);
-            let estudios = clean_html(&data.estudios);
-            let estudios_mas_recientes = clean_html(&data.estudios_mas_recientes);
-            let experiencia = clean_html(&data.experiencia);
-
-            statement.execute((
-                &data.email,
-                &data.nombre,
-                &data.sexo,
-                &data.fecha_nacimiento,
-                &data.edad,
-                normalize(&data.provincia),
-                normalize(&data.ciudad),
-                descripcion,
-                estudios,
-                estudios_mas_recientes,
-                experiencia,
-            ))?;
-
-            inserted += 1;
-        }
-        tracing::info!(
-            "Se insertaron {inserted} columnas en tnea_raw! en {} ms",
-            start.elapsed().as_millis()
+    let inserted = statement
+        .execute(rusqlite::params![])
+        .map_err(|err| eyre::eyre!(err))
+        .expect(
+            "deberia poder ser convertido a un string compatible con c o hubo un error en sqlite",
         );
-    }
 
-    {
-        let start = std::time::Instant::now();
-        let sql_statement = &template.template;
-        let mut statement = db.prepare(&format!(
-            "
-            insert into tnea (email, provincia, ciudad, edad, sexo, template)
-            select email, provincia, ciudad, edad, sexo, {sql_statement} as template
-            from tnea_raw;
-            "
-        ))?;
-
-        let inserted = statement.execute(rusqlite::params![])
-                .map_err(|err| eyre::eyre!(err))
-                .expect("deberia poder ser convertido a un string compatible con c o hubo un error en sqlite");
-
-        tracing::info!(
-            "Se insertaron {inserted} columnas en tnea! en {} ms",
-            start.elapsed().as_millis()
-        );
-    }
+    tracing::info!(
+        "Se insertaron {inserted} columnas en tnea! en {} ms",
+        start.elapsed().as_millis()
+    );
 
     db.execute("COMMIT", []).expect(
         "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
     );
 
     Ok(())
+}
+
+fn parse_and_insert(
+    path: impl AsRef<Path>,
+    template: &configuration::Template,
+    db: &rusqlite::Connection,
+) -> eyre::Result<usize> {
+    let mut inserted = 0;
+    let mut statement = db.prepare(
+        "
+        insert into tnea_raw (
+            email,
+            nombre,
+            sexo,
+            fecha_nacimiento,
+            edad,
+            provincia,
+            ciudad,
+            descripcion,
+            estudios,
+            estudios_mas_recientes,
+            experiencia
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )?;
+
+    let datasources = utils::parse_sources(path)?;
+    for (source, ext) in datasources {
+        tracing::info!("Leyendo {source:?}...");
+
+        let data = match ext {
+            utils::DataSources::Csv => {
+                let mut reader_config = csv::ReaderBuilder::new();
+                let mut reader = reader_config
+                    .flexible(true)
+                    .trim(csv::Trim::All)
+                    .has_headers(true)
+                    .quote(b'"')
+                    .from_path(&source)?;
+
+                let headers: Vec<String> = reader
+                    .headers()?
+                    .into_iter()
+                    .map(std::string::ToString::to_string)
+                    .collect();
+
+                for field in &template.fields {
+                    if !headers.contains(field) {
+                        return Err(eyre::eyre!(
+                            "El archivo {source:?} no tiene el header {field}.",
+                        ));
+                    }
+                }
+
+                reader
+                .deserialize()
+                .collect::<Result<Vec<TneaData>, csv::Error>>()
+                .map_err(|err| eyre::eyre!("{source:?} no pudo ser deserializado. Hay que controlar que tenga los headers correctos. Err: {err}"))?
+            }
+            utils::DataSources::Json => {
+                let file = File::open(&source)?;
+                let reader = BufReader::new(file);
+
+                serde_json::from_reader::<_, Vec<TneaData>>(reader)?
+            }
+        };
+        let total_registros = data.len();
+
+        tracing::info!("Abriendo transacción para insertar datos en la tabla `tnea_raw` y `tnea`!");
+        db.execute("BEGIN TRANSACTION", []).expect(
+            "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
+        );
+
+        for d in data.into_iter() {
+            statement.execute((
+                &d.email,
+                &d.nombre,
+                &d.sexo,
+                &d.fecha_nacimiento,
+                &d.edad,
+                normalize(&d.provincia),
+                normalize(&d.ciudad),
+                clean_html(d.descripcion),
+                clean_html(d.estudios),
+                clean_html(d.estudios_mas_recientes),
+                clean_html(d.experiencia),
+            ))?;
+
+            inserted += 1;
+        }
+
+        db.execute("COMMIT", []).expect(
+            "Deberia poder ser convertido a un string compatible con C o hubo un error en SQLite",
+        );
+
+        tracing::info!(
+            "Leyendo {source:?}... listo! - {} nuevos registros",
+            total_registros,
+        );
+    }
+
+    Ok(inserted)
 }
 
 pub fn update_historial(db: &Connection, query: &str) -> eyre::Result<(), ReportError> {
@@ -379,4 +432,13 @@ pub fn normalize(str: &str) -> String {
         .trim()
         .to_lowercase()
         .replace("province", "")
+}
+
+#[inline]
+pub fn clean_html(str: String) -> String {
+    if ammonia::is_html(&str) {
+        ammonia::clean(&str)
+    } else {
+        str
+    }
 }

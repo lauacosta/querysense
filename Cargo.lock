@@ -2323,6 +2323,7 @@ dependencies = [
  "serde-aux",
  "serde_json",
  "sqlite-vec",
+ "thiserror 2.0.3",
  "tokenizers",
  "tokio",
  "tokio-util",
