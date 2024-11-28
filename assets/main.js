@@ -205,6 +205,7 @@ function updateForm() {
 	document.getElementById("age_min").value = searchConfig.edad_min;
 	document.getElementById("age_max").value = searchConfig.edad_max;
 	document.getElementById("balanceSlider").value = searchConfig.peso_fts || 50;
+	document.getElementById("vecinos").value = searchConfig.k;
 
 	const strategy = document.getElementById("strategy");
 	strategy.value = searchConfig.strategy;
