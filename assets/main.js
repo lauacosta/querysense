@@ -1,7 +1,8 @@
-document.addEventListener("DOMContentLoaded", function () {
+document.addEventListener("DOMContentLoaded", () => {
 	initHistorial();
 	initKeyboard();
-	initForm();
+	updateForm();
+	hideElements();
 	initPagination();
 	initCsv();
 	initSlider();
@@ -10,12 +11,12 @@ document.addEventListener("DOMContentLoaded", function () {
 function initHistorial() {
 	const historialItems = document.querySelectorAll(".historial-item");
 	console.log(historialItems);
-	historialItems.forEach((item) => {
-		item.addEventListener("click", function () {
+	for (const item of historialItems) {
+		item.addEventListener("click", () => {
 			const queryContent = item.textContent || "";
 			document.getElementById("search-input").value = queryContent.trim();
 		});
-	});
+	}
 }
 
 /**
@@ -24,7 +25,7 @@ function initHistorial() {
 function initKeyboard() {
 	document.addEventListener(
 		"keydown",
-		function (event) {
+		(event) => {
 			const input = document.getElementById("search-input");
 			if (event.ctrlKey && event.key === "b") {
 				event.preventDefault();
@@ -103,11 +104,11 @@ function table_to_csv(table_id) {
 	const rows = table.querySelectorAll("tr");
 	let csvContent = "";
 
-	rows.forEach((row) => {
+	for (const row of rows) {
 		const cells = row.querySelectorAll("td.csv");
 		const rowData = Array.from(cells, (cell) => cell.textContent);
-		csvContent += rowData.join(",") + "\n";
-	});
+		csvContent += `${rowData.join(",")}\n`;
+	}
 
 	return csvContent;
 }
@@ -138,38 +139,75 @@ function initCsv() {
 		return;
 	}
 
-	trigger.addEventListener("click", function () {
+	trigger.addEventListener("click", () => {
 		const csv_content = table_to_csv("table-content");
 		download_csv(csv_content, "datos-busqueda.csv");
+	});
+}
+
+function hideElements() {
+	const ocultables = document.querySelectorAll(".ocultable");
+	const strategy = document.getElementById("strategy");
+	const balance_slider = document.querySelector(".balance-slider");
+
+	// Initial setup based on the current value of strategy
+	if (strategy.value === "ReciprocalRankFusion") {
+		balance_slider.style.display = "block";
+		for (const item of ocultables) {
+			item.style.display = "block";
+		}
+	} else {
+		balance_slider.style.display = "none";
+		if (strategy.value === "Fts") {
+			for (const item of ocultables) {
+				item.style.display = "none";
+			}
+		} else {
+			for (const item of ocultables) {
+				item.style.display = "block";
+			}
+		}
+	}
+
+	// Attach event listener
+	strategy.addEventListener("change", () => {
+		if (strategy.value === "ReciprocalRankFusion") {
+			balance_slider.style.display = "block";
+			for (const item of ocultables) {
+				item.style.display = "block";
+			}
+		} else {
+			balance_slider.style.display = "none";
+			if (strategy.value === "Fts") {
+				for (const item of ocultables) {
+					item.style.display = "none";
+				}
+			} else {
+				for (const item of ocultables) {
+					item.style.display = "block";
+				}
+			}
+		}
 	});
 }
 
 /**
  * Inicializa el form para la búsqueda, pre-completando valores a partir de la URL si es posible.
  */
-function initForm() {
+function updateForm() {
 	const searchConfig = getUrlParams();
-
-	let balance_slider = document.getElementById("balanceSlider");
-	balance_slider.disabled = true;
 
 	if (Object.keys(searchConfig).length === 0) {
 		return;
 	}
+
 	document.getElementById("search-input").value = searchConfig.query;
 	document.getElementById("age_min").value = searchConfig.edad_min;
 	document.getElementById("age_max").value = searchConfig.edad_max;
-	let strategy = document.getElementById("strategy");
-	strategy.value = searchConfig.strategy;
-	balance_slider.value = searchConfig.peso_fts || 50;
+	document.getElementById("balanceSlider").value = searchConfig.peso_fts || 50;
 
-	strategy.addEventListener("change", () => {
-		if (strategy.value === "HybridRrf") {
-			balance_slider.disabled = false;
-		} else {
-			balance_slider.disabled = true;
-		}
-	});
+	const strategy = document.getElementById("strategy");
+	strategy.value = searchConfig.strategy;
 
 	document.getElementById("value1Display").textContent = searchConfig.peso_fts;
 	document.getElementById("value2Display").textContent =

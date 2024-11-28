@@ -3,6 +3,7 @@ use querysense::{
     cli::{Cli, Commands, SyncStrategy},
     configuration, openai, sqlite, startup,
 };
+use rusqlite::Connection;
 use tracing::{level_filters::LevelFilter, Level};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Registry};
@@ -63,7 +64,7 @@ fn main() -> eyre::Result<()> {
             force: hard,
             model,
         } => {
-            let db = sqlite::init_sqlite()?;
+            let db = Connection::open(sqlite::init_sqlite()?)?;
 
             if hard {
                 let exists: String = match db.query_row(

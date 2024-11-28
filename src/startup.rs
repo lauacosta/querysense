@@ -1,12 +1,10 @@
 use axum::handler::HandlerWithoutStateExt;
 use axum::Extension;
 use std::net::IpAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
 use tokio::signal;
-use tokio::sync::Mutex;
 use tower::ServiceBuilder;
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tower_request_id::{RequestId, RequestIdLayer};
@@ -19,7 +17,7 @@ use crate::sqlite::init_sqlite;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
-    pub db: Arc<Mutex<rusqlite::Connection>>,
+    pub db_path: String,
     pub cache: Cache,
 }
 
@@ -63,10 +61,10 @@ impl Application {
 
         let host = configuration.host;
 
-        let db = Arc::new(Mutex::new(init_sqlite()?));
+        let db_path = init_sqlite()?;
         let cache = configuration.cache;
 
-        let state = AppState { db, cache };
+        let state = AppState { db_path, cache };
 
         let server = build_server(listener, state)?;
 

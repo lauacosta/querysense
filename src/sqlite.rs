@@ -127,7 +127,7 @@ pub fn sync_fts_tnea(db: &Connection) {
     );
 }
 
-pub fn init_sqlite() -> eyre::Result<rusqlite::Connection> {
+pub fn init_sqlite() -> eyre::Result<String> {
     unsafe {
         sqlite3_auto_extension(Some(std::mem::transmute(sqlite3_vec_init as *const ())));
     }
@@ -137,7 +137,7 @@ pub fn init_sqlite() -> eyre::Result<rusqlite::Connection> {
             err
         )
     })?;
-    Ok(rusqlite::Connection::open(path)?)
+    Ok(path)
 }
 
 pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()> {

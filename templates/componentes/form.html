@@ -13,11 +13,11 @@
         <div class="search-group">
         <label for="strategy">Método de Búsqueda:</label>
             <select id="strategy" name="strategy" class="search-type">
-                <option value="Fts" selected>FTS</option>
+                <option value="Fts" selected>Full Text Search</option>
                 <option value="Semantic">Semántica</option>
-                <option value="HybridRrf">Híbrido Reciprocal Rank Fusion</option>
-                <option value="HybridKf">Híbrido Keyword First</option>
-                <option value="HybridReRank">Híbrido Re-Ranking by Semantics</option>
+                <option value="ReciprocalRankFusion">Reciprocal Rank Fusion</option>
+                <option value="KeywordFirst">Keyword First</option>
+                <option value="ReRankBySemantics">Re-Ranking by Semantics</option>
             </select>
         </div>
 
@@ -38,20 +38,33 @@
         <div class="search-group">
             <label>Rango de Edad:</label>
             <div class="age-range">
-                <input type="number" id="age_min" name="edad_min" min="18" max="100" value="18" placeholder="Mínimo">
-                <input type="number" id="age_max" name="edad_max" min="18" max="100" value="100" placeholder="Máximo">
+                <input type="number" id="age_min" name="edad_min" min="0" max="100" value="0" placeholder="Mínimo">
+                <input type="number" id="age_max" name="edad_max" min="0" max="100" value="100" placeholder="Máximo">
             </div>
         </div>
 
-        <div class="search-group">
-            <label for="balanceSlider">Pesos:</label>
+        <div class="search-group ocultable">
+            <label for="k">N° de Vecinos:
+                <span class="help-icon">
+                    &#9432;
+                    <span class="search-tooltip">Representa el número de resultados más cercanos que se quiere buscar.</span>
+                </span>
+            </label>
+            <div class="age-range">
+                <input type="number" id="vecinos" name="k" min="1" max="10000" value="1000">
+            </div>
+        </div>
+
+        <div class="search-group balance-slider">
+            <label for="balanceSlider">Pesos:
+                <span class="help-icon">
+                    &#9432;
+                    <span class="search-tooltip">Representa el compromiso de asignarle más importancia a los resultados de cada búsqueda.</span>
+                </span>
+            </label>
             <input type="range" id="balanceSlider" min="0" max="100" value="50">
             <p>Peso FTS: <span id="value1Display" class="slider-value">50</span></p>
             <p>Peso Semantic: <span id="value2Display" class="slider-value">50</span></p>
-
-            <div class="tooltip">
-                Esto solo tiene efecto si el metodo de búsqueda es Reciprocal Rank Fusion!
-            </div>
         </div>
 
         <div class="search-group">
