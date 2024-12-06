@@ -1,9 +1,9 @@
 // Implementado en base a los ejemplos en:
 // https://github.com/huggingface/candle/tree/main/candle-examples/examples/t5
+
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{anyhow, Error as E};
 use candle_core::Result;
 use candle_core::{
     utils::{cuda_is_available, metal_is_available},
@@ -12,6 +12,7 @@ use candle_core::{
 use candle_nn::VarBuilder;
 use candle_transformers::models::t5;
 use clap::ValueEnum;
+use eyre::{eyre, Error as E};
 use hf_hub::{api::sync::Api, Repo, RepoType};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use tokenizers::Tokenizer;
@@ -70,12 +71,12 @@ struct T5ModelBuilder {
 }
 
 impl T5ModelBuilder {
-    pub fn load(args: &Args) -> anyhow::Result<(Self, Tokenizer)> {
+    pub fn load(args: &Args) -> eyre::Result<(Self, Tokenizer)> {
         let device = device(args.cpu)
-            .map_err(|err| anyhow!("Ocurrio un error al determinar el dispositivo {err}"))?;
+            .map_err(|err| eyre!("Ocurrio un error al determinar el dispositivo {err}"))?;
         let (default_model, default_revision) = match args.which {
             Model::T5Small => ("t5-small", "refs/pr/15"),
-            _ => return Err(anyhow!("Este modelo no se reconoce.")),
+            _ => return Err(eyre!("Este modelo no se reconoce.")),
         };
         let default_model = default_model.to_string();
         let default_revision = default_revision.to_string();
@@ -88,19 +89,19 @@ impl T5ModelBuilder {
 
         let repo = Repo::with_revision(model_id.clone(), RepoType::Model, revision);
         let api =
-            Api::new().map_err(|err| anyhow!("Ocurrio un error al crear la Default Api: {err}"))?;
+            Api::new().map_err(|err| eyre!("Ocurrio un error al crear la Default Api: {err}"))?;
 
         let repo = api.repo(repo);
         let config_filename = match &args.config_file {
             None => repo
                 .get("config.json")
-                .map_err(|err| anyhow!("Ocurrio un error al obtener 'config.json': {err}"))?,
+                .map_err(|err| eyre!("Ocurrio un error al obtener 'config.json': {err}"))?,
             Some(f) => f.into(),
         };
         let tokenizer_filename = match &args.tokenizer_file {
             None => repo
                 .get("tokenizer.json")
-                .map_err(|err| anyhow!("Ocurrio un error al obtener 'tokenizer.json': {err}"))?,
+                .map_err(|err| eyre!("Ocurrio un error al obtener 'tokenizer.json': {err}"))?,
             Some(f) => f.into(),
         };
         let weights_filename = match &args.model_file {
@@ -111,11 +112,11 @@ impl T5ModelBuilder {
             None => {
                 if model_id == "google/flan-t5-xxl" || model_id == "google/flan-ul2" {
                     hub_load_safetensors(&repo, "model.safetensors.index.json").map_err(|err| {
-                        anyhow!("Ocurrio un error al obtener 'model.safetensors.index.json': {err}")
+                        eyre!("Ocurrio un error al obtener 'model.safetensors.index.json': {err}")
                     })?
                 } else {
                     vec![repo.get("model.safetensors").map_err(|err| {
-                        anyhow!("Ocurrio un error al obtener 'model.safetensors': {err}")
+                        eyre!("Ocurrio un error al obtener 'model.safetensors': {err}")
                     })?]
                 }
             }
@@ -133,7 +134,7 @@ impl T5ModelBuilder {
         ))
     }
 
-    pub fn build_encoder(&self) -> anyhow::Result<t5::T5EncoderModel> {
+    pub fn build_encoder(&self) -> eyre::Result<t5::T5EncoderModel> {
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&self.weights_filename, DTYPE, &self.device)?
         };
@@ -146,7 +147,7 @@ impl T5ModelBuilder {
 pub fn create_embeddings(
     templates: Vec<(u64, String)>,
     args: Args,
-) -> anyhow::Result<Vec<(u64, Vec<f32>)>> {
+) -> eyre::Result<Vec<(u64, Vec<f32>)>> {
     let start = std::time::Instant::now();
 
     tracing::info!("Cargando el modelo...");
@@ -245,11 +246,11 @@ pub fn create_embeddings(
 
     Ok(final_embeddings)
 }
-pub fn normalize_l2(v: &Tensor) -> anyhow::Result<Tensor> {
+pub fn normalize_l2(v: &Tensor) -> eyre::Result<Tensor> {
     Ok(v.broadcast_div(&v.sqr()?.sum_keepdim(1)?.sqrt()?)?)
 }
 
-pub fn device(cpu: bool) -> anyhow::Result<Device> {
+pub fn device(cpu: bool) -> eyre::Result<Device> {
     if cpu {
         Ok(Device::Cpu)
     } else if cuda_is_available() {
@@ -264,14 +265,14 @@ pub fn device(cpu: bool) -> anyhow::Result<Device> {
 pub fn hub_load_safetensors(
     repo: &hf_hub::api::sync::ApiRepo,
     json_file: &str,
-) -> anyhow::Result<Vec<std::path::PathBuf>> {
+) -> eyre::Result<Vec<std::path::PathBuf>> {
     let json_file = repo.get(json_file).map_err(Error::wrap)?;
     let json_file = std::fs::File::open(json_file)?;
     let json: serde_json::Value = serde_json::from_reader(&json_file).map_err(Error::wrap)?;
     let weight_map = match json.get("weight_map") {
-        None => anyhow::bail!("no weight map in {json_file:?}"),
+        None => eyre::bail!("no weight map in {json_file:?}"),
         Some(serde_json::Value::Object(map)) => map,
-        Some(_) => anyhow::bail!("weight map in {json_file:?} is not a map"),
+        Some(_) => eyre::bail!("weight map in {json_file:?} is not a map"),
     };
     let mut safetensors_files = std::collections::HashSet::new();
     for value in weight_map.values() {

@@ -70,6 +70,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+
+      - name: Install Bun
+        run: |
+          curl -fsSL https://bun.sh/install | bash
+          export PATH="$HOME/.bun/bin:$PATH"
+
+      - name: Install dependencies and build frontend
+        run: |
+          bun install
+          bun vite build
+
       - name: cargo-semver-checks
         uses: obi1kenobi/cargo-semver-checks-action@v2
   doc:

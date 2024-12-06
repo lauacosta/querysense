@@ -3,7 +3,6 @@ serve:
 
 all: assets serve
 
-
 assets:
     bun vite build
 

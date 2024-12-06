@@ -315,7 +315,7 @@ impl SearchStrategy {
                 };
 
                 search_query.push_str(
-                    "order by combined_rank desc
+                    " order by combined_rank desc
                     ) 
                     select * from final;
                 ",
