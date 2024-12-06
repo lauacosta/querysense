@@ -3,6 +3,7 @@ use querysense::{
     cli::{Cli, Commands, SyncStrategy},
     configuration, openai, sqlite, startup,
 };
+use rusqlite::Connection;
 use tracing::{level_filters::LevelFilter, Level};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Registry};
@@ -11,8 +12,7 @@ use tracing_tree::HierarchicalLayer;
 fn main() -> eyre::Result<()> {
     color_eyre::install()?;
     dotenvy::dotenv()
-        .map_err(|err| eyre::eyre!("El archivo .env no fue encontrado. err: {}", err))
-        .unwrap();
+        .map_err(|err| eyre::eyre!("El archivo .env no fue encontrado. err: {}", err))?;
 
     let cli = Cli::parse();
     let level = match cli.loglevel.to_lowercase().trim() {
@@ -64,14 +64,22 @@ fn main() -> eyre::Result<()> {
             force: hard,
             model,
         } => {
-            let db = sqlite::init_sqlite()?;
+            let db = Connection::open(sqlite::init_sqlite()?)?;
 
             if hard {
-                let exists: String = db.query_row(
+                let exists: String = match db.query_row(
                     "select name from sqlite_master where type='table' and name=?",
                     ["tnea"],
                     |row| row.get(0),
-                )?;
+                ) {
+                    Ok(msg) => msg,
+                    Err(err) => {
+                        return Err(eyre::eyre!(
+                            "Es probable que la base de datos no esté creada. err: {}",
+                            err
+                        ))
+                    }
+                };
 
                 if !exists.is_empty() {
                     db.execute("drop table tnea", [])?;
