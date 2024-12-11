@@ -51,6 +51,7 @@ impl SearchString {
     pub fn parse(search_str: &str) -> Self {
         if let Some((query, filters)) = search_str.split_once('|') {
             if let Some((provincia, ciudad)) = filters.split_once(',') {
+                // TODO: Filter if it is only whitespace.
                 let provincia = Some(format!("%{}%", normalize(provincia)));
                 let ciudad = Some(format!("%{}%", normalize(ciudad)));
                 return Self {
