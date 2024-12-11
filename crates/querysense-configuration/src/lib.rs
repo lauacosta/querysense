@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use crate::cli::Cache;
+use querysense_cli::Cache;
 
 #[derive(Debug, Clone)]
 pub struct ApplicationSettings {
@@ -73,4 +73,15 @@ impl TryFrom<String> for Template {
             fields,
         })
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // #[test]
+    // fn it_works() {
+    //     let result = add(2, 2);
+    //     assert_eq!(result, 4);
+    // }
 }

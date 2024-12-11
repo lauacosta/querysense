@@ -1,9 +1,10 @@
 use std::fmt::Display;
 
-use askama_axum::{IntoResponse, Template};
+use axum::response::{IntoResponse, Response};
+use rinja::Template;
 use rusqlite::{
-    types::{FromSql, FromSqlError, ValueRef},
     ToSql,
+    types::{FromSql, FromSqlError, ValueRef},
 };
 use serde::Deserialize;
 
@@ -14,7 +15,7 @@ pub enum SearchResponse {
 }
 
 impl IntoResponse for SearchResponse {
-    fn into_response(self) -> askama_axum::Response {
+    fn into_response(self) -> Response {
         match self {
             SearchResponse::Common(table) => table.into_response(),
             SearchResponse::RrfTable(rrf_table) => rrf_table.into_response(),
@@ -227,4 +228,15 @@ impl Historial {
     pub fn new(id: u64, query: String) -> Self {
         Self { id, query }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // #[test]
+    // fn it_works() {
+    //     let result = add(2, 2);
+    //     assert_eq!(result, 4);
+    // }
 }

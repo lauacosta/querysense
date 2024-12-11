@@ -1,5 +1,10 @@
-use std::time::Duration;
+use std::{
+    env::var,
+    time::{Duration, Instant},
+};
 
+use eyre::Result;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -49,15 +54,16 @@ pub enum EmbeddingError {
 }
 
 async fn request_embeddings(
-    client: &reqwest::Client,
+    client: &Client,
     token: &str,
     request: &RequestBody,
     attempt: u32,
     max_retries: u32,
+    time_backoff: u64,
 ) -> Result<reqwest::Response, EmbeddingError> {
     if attempt > 0 {
-        tracing::warn!("Itento {} of {}", attempt, max_retries);
-        let delay = Duration::from_millis(1000 * 2u64.pow(attempt - 1));
+        tracing::warn!("Intento {} of {}", attempt, max_retries);
+        let delay = Duration::from_millis(1000 * time_backoff.pow(attempt - 1));
         tokio::time::sleep(delay).await;
     }
 
@@ -93,9 +99,11 @@ async fn request_embeddings(
 pub async fn embed_vec(
     indices: Vec<u64>,
     input: Vec<String>,
-    client: &reqwest::Client,
-) -> eyre::Result<Vec<(u64, Vec<f32>)>> {
-    let global_start = std::time::Instant::now();
+    client: &Client,
+    proc_id: usize,
+    time_backoff: u64,
+) -> Result<Vec<(u64, Vec<f32>)>> {
+    let global_start = Instant::now();
 
     let request = RequestBody {
         input,
@@ -104,16 +112,25 @@ pub async fn embed_vec(
         dimensions: Some(1536),
     };
 
-    let token = std::env::var("OPENAI_KEY").expect("`OPENAI_KEY debería estar definido en el .env");
+    let token = var("OPENAI_KEY").expect("`OPENAI_KEY debería estar definido en el .env");
 
     const MAX_INTENTOS: u32 = 3;
     let mut intento = 0;
     let mut response = None;
 
     while intento <= MAX_INTENTOS {
-        let req_start = std::time::Instant::now();
+        let req_start = Instant::now();
         tracing::info!("Enviando request a Open AI...");
-        match request_embeddings(client, &token, &request, intento, MAX_INTENTOS).await {
+        match request_embeddings(
+            client,
+            &token,
+            &request,
+            intento,
+            MAX_INTENTOS,
+            time_backoff,
+        )
+        .await
+        {
             Ok(resp) => {
                 tracing::info!("El request tomó {} ms", req_start.elapsed().as_millis());
                 response = Some(resp);
@@ -128,7 +145,7 @@ pub async fn embed_vec(
 
     let response = response.ok_or(EmbeddingError::MaxRetriesExceeded)?;
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
 
     let response: ResponseBody = response.json().await?;
 
@@ -137,7 +154,7 @@ pub async fn embed_vec(
         start.elapsed().as_millis()
     );
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let embedding = std::iter::zip(
         indices,
         EmbeddingObject::embeddings_iter(response.embeddings),
@@ -156,8 +173,8 @@ pub async fn embed_vec(
 }
 
 #[instrument(name = "Generando embedding del query", skip(input, client))]
-pub async fn embed_single(input: String, client: &reqwest::Client) -> eyre::Result<Vec<f32>> {
-    let global_start = std::time::Instant::now();
+pub async fn embed_single(input: String, client: &Client) -> Result<Vec<f32>> {
+    let global_start = Instant::now();
 
     #[derive(Serialize, Deserialize)]
     pub struct RequestBody {
@@ -174,8 +191,8 @@ pub async fn embed_single(input: String, client: &reqwest::Client) -> eyre::Resu
         dimensions: Some(1536),
     };
 
-    let token = std::env::var("OPENAI_KEY").expect("`OPENAI_KEY debería estar definido en el .env");
-    let req_start = std::time::Instant::now();
+    let token = var("OPENAI_KEY").expect("`OPENAI_KEY debería estar definido en el .env");
+    let req_start = Instant::now();
     tracing::info!("Enviando request a Open AI...");
     let response = client
         .post("https://api.openai.com/v1/embeddings")
@@ -187,7 +204,7 @@ pub async fn embed_single(input: String, client: &reqwest::Client) -> eyre::Resu
     assert_eq!(response.status().as_u16(), 200);
     tracing::info!("El request tomó {} ms", req_start.elapsed().as_millis());
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let response: ResponseBody = response.json().await?;
     tracing::info!(
         "Deserializar la response a ResponseBody tomó {} ms",
@@ -212,3 +229,14 @@ pub async fn embed_single(input: String, client: &reqwest::Client) -> eyre::Resu
 // TODO: Implementar las interfaces para poder realizar batch requests y ahorrar gastos.
 // pub async fn batch_embed(input: [&str]) -> eyre::Result<Vec<Vec<f32>>> {
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // #[test]
+    // fn it_works() {
+    //     let result = add(2, 2);
+    //     assert_eq!(result, 4);
+    // }
+}

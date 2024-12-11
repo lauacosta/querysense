@@ -1,19 +1,19 @@
-use axum::handler::HandlerWithoutStateExt;
 use axum::Extension;
+use axum::handler::HandlerWithoutStateExt;
+use querysense_cli::Cache;
+use querysense_configuration::ApplicationSettings;
+use querysense_sqlite::init_sqlite;
 use std::net::IpAddr;
 use std::time::Duration;
 
-use axum::{body::Body, http::Request, routing::get, serve::Serve, Router};
+use axum::{Router, body::Body, http::Request, routing::get, serve::Serve};
 use tokio::signal;
 use tower::ServiceBuilder;
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tower_request_id::{RequestId, RequestIdLayer};
-use tracing::{error_span, instrument, Level};
+use tracing::{Level, error_span, instrument};
 
-use crate::cli::Cache;
-use crate::configuration::{self, ApplicationSettings};
 use crate::routes;
-use crate::sqlite::init_sqlite;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -165,7 +165,7 @@ pub fn build_server(
 }
 
 #[instrument(skip(configuration))]
-pub async fn run_server(configuration: configuration::ApplicationSettings) -> eyre::Result<()> {
+pub async fn run_server(configuration: ApplicationSettings) -> eyre::Result<()> {
     match Application::build(configuration).await {
         Ok(app) => {
             tracing::info!(

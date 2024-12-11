@@ -5,13 +5,19 @@ mod historial;
 mod index;
 mod search;
 
-use askama_axum::{IntoResponse, Response};
 pub use assets::*;
 pub use fallback::*;
 pub use health_check::*;
 pub use historial::*;
-use http::StatusCode;
 pub use index::*;
+
+use querysense_common::ReportError;
+use querysense_openai::embed_single;
+use querysense_sqlite::{get_historial, normalize};
+use querysense_ui::{
+    Fallback, Historial, ReRankDisplay, ResponseMarker, RrfTable, SearchResponse, Sexo, Table,
+    TneaDisplay,
+};
 use reqwest::Client;
 use rusqlite::{Connection, ToSql};
 pub use search::*;
@@ -19,14 +25,6 @@ pub use search::*;
 use serde::Deserialize;
 use tracing::instrument;
 use zerocopy::IntoBytes;
-
-use crate::{
-    openai, sqlite,
-    templates::{
-        Fallback, Historial, ReRankDisplay, ResponseMarker, RrfTable, SearchResponse, Sexo, Table,
-        TneaDisplay,
-    },
-};
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Params {
@@ -42,25 +40,39 @@ pub struct Params {
     k_neighbors: u64,
 }
 
-fn parse_search_str(search_str: &str) -> (String, String, String) {
-    if let Some((query, filters)) = search_str.split_once('|') {
-        if let Some((provincia, ciudad)) = filters.split_once(',') {
-            let provincia = format!("%{provincia}%");
-            let ciudad = format!("%{ciudad}%");
-            (
-                sqlite::normalize(query),
-                sqlite::normalize(&provincia),
-                sqlite::normalize(&ciudad),
-            )
+#[derive(Debug)]
+pub struct SearchString {
+    query: String,
+    provincia: Option<String>,
+    ciudad: Option<String>,
+}
+
+impl SearchString {
+    pub fn parse(search_str: &str) -> Self {
+        if let Some((query, filters)) = search_str.split_once('|') {
+            if let Some((provincia, ciudad)) = filters.split_once(',') {
+                let provincia = Some(format!("%{}%", normalize(provincia)));
+                let ciudad = Some(format!("%{}%", normalize(ciudad)));
+                return Self {
+                    query: normalize(query),
+                    provincia,
+                    ciudad,
+                };
+            } else {
+                let provincia = Some(format!("%{}%", normalize(filters)));
+                return Self {
+                    query: normalize(query),
+                    provincia,
+                    ciudad: None,
+                };
+            }
         } else {
-            (
-                sqlite::normalize(query),
-                sqlite::normalize(filters),
-                String::new(),
-            )
+            return Self {
+                query: normalize(search_str),
+                provincia: None,
+                ciudad: None,
+            };
         }
-    } else {
-        (sqlite::normalize(search_str), String::new(), String::new())
     }
 }
 
@@ -77,7 +89,12 @@ impl SearchStrategy {
     pub async fn search(self, db_path: &str, client: &Client, params: Params) -> SearchResponse {
         let db = Connection::open(db_path)
             .expect("Deberia ser un path valido a una base de datos sqlite.");
-        let (query, provincia, ciudad) = parse_search_str(&params.search_str);
+        let search = SearchString::parse(&params.search_str);
+        tracing::debug!(?search);
+        let query = search.query;
+        let provincia = search.provincia;
+        let ciudad = search.ciudad;
+
         match self {
             SearchStrategy::Fts => {
                 let mut search_query = SearchQuery::new(
@@ -98,10 +115,10 @@ impl SearchStrategy {
                 );
                 search_query.add_bindings(&[&query, &params.edad_min, &params.edad_max]);
 
-                if !provincia.is_empty() {
+                if provincia.is_some() {
                     search_query.add_filter(" and provincia like :provincia", &[&provincia]);
                 }
-                if !ciudad.is_empty() {
+                if ciudad.is_some() {
                     search_query.add_filter(" and ciudad like :ciudad", &[&ciudad]);
                 }
 
@@ -131,12 +148,12 @@ impl SearchStrategy {
                 };
 
                 tracing::info!(
-                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
-                query,
-                table.len(),
-                table.first().map_or_else(Default::default, |d| d.score),
-                table.last().map_or_else(Default::default, |d| d.score),
-            );
+                    "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
+                    query,
+                    table.len(),
+                    table.first().map_or_else(Default::default, |d| d.score),
+                    table.last().map_or_else(Default::default, |d| d.score),
+                );
 
                 let historial = match update_historial(&db, &params.search_str) {
                     Ok(historial) => historial,
@@ -151,7 +168,7 @@ impl SearchStrategy {
                 .into()
             }
             SearchStrategy::Semantic => {
-                let query_emb = openai::embed_single(query.to_string(), client)
+                let query_emb = embed_single(query.to_string(), client)
                     .await
                     .map_err(|err| tracing::error!("{err}"))
                     .expect("Fallo al crear un embedding del query");
@@ -179,11 +196,11 @@ impl SearchStrategy {
                 );
                 search_query.add_bindings(&[&embedding, &params.edad_min, &params.edad_max]);
 
-                if !provincia.is_empty() {
+                if provincia.is_some() {
                     search_query.add_filter(" and tnea.provincia like :provincia", &[&provincia]);
                 }
 
-                if !ciudad.is_empty() {
+                if ciudad.is_some() {
                     search_query.add_filter(" and tnea.ciudad like :ciudad", &[&ciudad]);
                 }
 
@@ -212,12 +229,12 @@ impl SearchStrategy {
                 };
 
                 tracing::info!(
-                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
-                query,
-                table.len(),
-                table.first().map_or_else(Default::default, |d| d.score),
-                table.last().map_or_else(Default::default, |d| d.score),
-            );
+                    "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
+                    query,
+                    table.len(),
+                    table.first().map_or_else(Default::default, |d| d.score),
+                    table.last().map_or_else(Default::default, |d| d.score),
+                );
 
                 let historial = match update_historial(&db, &params.search_str) {
                     Ok(historial) => historial,
@@ -232,7 +249,7 @@ impl SearchStrategy {
                 .into()
             }
             SearchStrategy::ReciprocalRankFusion => {
-                let query_emb = openai::embed_single(query.to_string(), client)
+                let query_emb = embed_single(query.to_string(), client)
                     .await
                     .map_err(|err| tracing::error!("{err}"))
                     .expect("Fallo al crear un embedding del query");
@@ -300,11 +317,11 @@ impl SearchStrategy {
                     &params.edad_max,
                 ]);
 
-                if !provincia.is_empty() {
+                if provincia.is_some() {
                     search_query.add_filter(" and tnea.provincia like :provincia", &[&provincia]);
                 }
 
-                if !ciudad.is_empty() {
+                if ciudad.is_some() {
                     search_query.add_filter(" and tnea.ciudad like :ciudad", &[&ciudad]);
                 }
 
@@ -354,12 +371,16 @@ impl SearchStrategy {
                 };
 
                 tracing::info!(
-                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
-                query,
-                table.len(),
-                table.first().map_or_else(Default::default, |d| d.combined_rank),
-                table.last().map_or_else(Default::default, |d| d.combined_rank),
-            );
+                    "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
+                    query,
+                    table.len(),
+                    table
+                        .first()
+                        .map_or_else(Default::default, |d| d.combined_rank),
+                    table
+                        .last()
+                        .map_or_else(Default::default, |d| d.combined_rank),
+                );
 
                 let historial = match update_historial(&db, &params.search_str) {
                     Ok(historial) => historial,
@@ -374,7 +395,7 @@ impl SearchStrategy {
                 .into()
             }
             SearchStrategy::KeywordFirst => {
-                let query_emb = openai::embed_single(query.to_string(), client)
+                let query_emb = embed_single(query.to_string(), client)
                     .await
                     .map_err(|err| tracing::error!("{err}"))
                     .expect("Fallo al crear un embedding del query");
@@ -433,11 +454,11 @@ impl SearchStrategy {
                     &params.edad_max,
                 ]);
 
-                if !provincia.is_empty() {
+                if provincia.is_some() {
                     search_query.add_filter(" and tnea.provincia like :provincia", &[&provincia]);
                 }
 
-                if !ciudad.is_empty() {
+                if ciudad.is_some() {
                     search_query.add_filter(" and tnea.ciudad like :ciudad", &[&ciudad]);
                 }
 
@@ -467,12 +488,12 @@ impl SearchStrategy {
                 };
 
                 tracing::info!(
-                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
-                query,
-                rows.len(),
-                rows.first().map_or_else(Default::default, |d| d.score),
-                rows.last().map_or_else(Default::default, |d| d.score),
-            );
+                    "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
+                    query,
+                    rows.len(),
+                    rows.first().map_or_else(Default::default, |d| d.score),
+                    rows.last().map_or_else(Default::default, |d| d.score),
+                );
 
                 let historial = match update_historial(&db, &params.search_str) {
                     Ok(historial) => historial,
@@ -487,7 +508,7 @@ impl SearchStrategy {
                 .into()
             }
             SearchStrategy::ReRankBySemantics => {
-                let query_emb = openai::embed_single(query.to_string(), client)
+                let query_emb = embed_single(query.to_string(), client)
                     .await
                     .map_err(|err| tracing::error!("{err}"))
                     .expect("Fallo al crear un embedding del query");
@@ -531,11 +552,11 @@ impl SearchStrategy {
                 );
                 search_query.add_bindings(&[&query, &k, &params.edad_min, &params.edad_max]);
 
-                if !provincia.is_empty() {
+                if provincia.is_some() {
                     search_query.add_filter(" and tnea.provincia like :provincia", &[&provincia]);
                 }
 
-                if !ciudad.is_empty() {
+                if ciudad.is_some() {
                     search_query.add_filter(" and tnea.ciudad like :ciudad", &[&ciudad]);
                 }
 
@@ -570,12 +591,12 @@ impl SearchStrategy {
                 };
 
                 tracing::info!(
-                "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
-                query,
-                rows.len(),
-                rows.first().map_or_else(Default::default, |d| d.score),
-                rows.last().map_or_else(Default::default, |d| d.score),
-            );
+                    "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
+                    query,
+                    rows.len(),
+                    rows.first().map_or_else(Default::default, |d| d.score),
+                    rows.last().map_or_else(Default::default, |d| d.score),
+                );
 
                 let historial = match update_historial(&db, &params.search_str) {
                     Ok(historial) => historial,
@@ -607,25 +628,6 @@ impl TryFrom<String> for SearchStrategy {
                 "{other} No es una estrategia de búsqueda soportada, usa 'fts', 'semantic_search', 'HKF' o 'rrf'",
             )),
         }
-    }
-}
-
-#[derive(Debug)]
-pub struct ReportError(pub eyre::Report);
-
-impl From<eyre::Report> for ReportError {
-    fn from(err: eyre::Report) -> Self {
-        ReportError(err)
-    }
-}
-
-impl IntoResponse for ReportError {
-    fn into_response(self) -> Response {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Internal server error: {:?}", self.0),
-        )
-            .into_response()
     }
 }
 
@@ -662,6 +664,7 @@ impl<'a> SearchQuery<'a> {
         T: ResponseMarker,
         F: Fn(&rusqlite::Row) -> rusqlite::Result<T>,
     {
+        tracing::debug!("{:?}", self.stmt_str);
         let mut statement = match self.db.prepare(&self.stmt_str) {
             Ok(stmt) => stmt,
             Err(err) => {
@@ -689,12 +692,12 @@ fn update_historial(
     db: &rusqlite::Connection,
     query: &str,
 ) -> eyre::Result<Vec<Historial>, SearchResponse> {
-    if let Err(err) = sqlite::update_historial(db, query) {
+    if let Err(err) = querysense_sqlite::update_historial(db, query) {
         tracing::error!("{:?}", err);
         return Err(Fallback.into());
     }
 
-    let historial = match sqlite::get_historial(db) {
+    let historial = match get_historial(db) {
         Ok(historial) => historial,
         Err(err) => {
             tracing::error!("{:?}", err);

@@ -3,28 +3,22 @@ use std::{
     io::BufReader,
     path::Path,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 
 use futures::StreamExt;
-use rusqlite::{ffi::sqlite3_auto_extension, Connection};
+use querysense_cli::Model;
+use querysense_common::{DataSources, ReportError, TneaData, parse_sources};
+use querysense_configuration::Template;
+use querysense_openai::embed_vec;
+use querysense_ui::Historial;
+use rusqlite::{Connection, ffi::sqlite3_auto_extension};
 use sqlite_vec::sqlite3_vec_init;
 use zerocopy::IntoBytes;
 
-use crate::{
-    cli::{self, Model},
-    configuration, openai,
-    routes::ReportError,
-    templates::Historial,
-    utils::{self, TneaData},
-};
-
-#[cfg(feature = "local")]
-use crate::embeddings;
-
-pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<()> {
+pub async fn sync_vec_tnea(db: &Connection, model: Model, time_backoff: u64) -> eyre::Result<()> {
     let mut statement = db.prepare("select id, template from tnea")?;
 
     let templates: Vec<(u64, String)> = match statement.query_map([], |row| {
@@ -47,16 +41,18 @@ pub async fn sync_vec_tnea(db: &Connection, model: cli::Model) -> eyre::Result<(
         .gzip(true)
         .build()?;
 
-    let jh = templates.chunks(chunk_size).map(|chunk| match model {
-        #[cfg(feature = "local")]
-        cli::Model::Local => async { Err(eyre!("Local model is unimplemented")) },
-        cli::Model::OpenAI => {
-            let indices: Vec<u64> = chunk.iter().map(|(id, _)| *id).collect();
-            let templates: Vec<String> =
-                chunk.iter().map(|(_, template)| template.clone()).collect();
-            openai::embed_vec(indices, templates, &client)
-        }
-    });
+    let jh = templates
+        .chunks(chunk_size)
+        .enumerate()
+        .map(|(proc_id, chunk)| match model {
+            Model::OpenAI => {
+                let indices: Vec<u64> = chunk.iter().map(|(id, _)| *id).collect();
+                let templates: Vec<String> =
+                    chunk.iter().map(|(_, template)| template.clone()).collect();
+                embed_vec(indices, templates, &client, proc_id, time_backoff)
+            }
+            Model::Local => todo!(),
+        });
 
     let stream = futures::stream::iter(jh);
 
@@ -219,12 +215,12 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()
                 );"
             }
 
-            #[cfg(feature = "local")]
             Model::Local => {
-                "create virtual table if not exists vec_tnea using vec0(
-                    row_id integer primary key,
-                    template_embedding float[512]
-                );"
+                todo!()
+                // "create virtual table if not exists vec_tnea using vec0(
+                //     row_id integer primary key,
+                //     template_embedding float[512]
+                // );"
             }
         }
     );
@@ -238,10 +234,7 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()
     Ok(())
 }
 
-pub fn insert_base_data(
-    db: &rusqlite::Connection,
-    template: &configuration::Template,
-) -> eyre::Result<()> {
+pub fn insert_base_data(db: &rusqlite::Connection, template: &Template) -> eyre::Result<()> {
     let num: usize = db.query_row("select count(*) from tnea", [], |row| row.get(0))?;
     if num != 0 {
         tracing::info!("La tabla `tnea` existe y tiene {num} registros.");
@@ -290,8 +283,8 @@ pub fn insert_base_data(
 
 fn parse_and_insert(
     path: impl AsRef<Path>,
-    template: &configuration::Template,
-    db: &rusqlite::Connection,
+    template: &Template,
+    db: &Connection,
 ) -> eyre::Result<usize> {
     let mut inserted = 0;
     let mut statement = db.prepare(
@@ -311,12 +304,12 @@ fn parse_and_insert(
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )?;
 
-    let datasources = utils::parse_sources(path)?;
+    let datasources = parse_sources(path)?;
     for (source, ext) in datasources {
         tracing::info!("Leyendo {source:?}...");
 
         let data = match ext {
-            utils::DataSources::Csv => {
+            DataSources::Csv => {
                 let mut reader_config = csv::ReaderBuilder::new();
                 let mut reader = reader_config
                     .flexible(true)
@@ -344,7 +337,7 @@ fn parse_and_insert(
                 .collect::<Result<Vec<TneaData>, csv::Error>>()
                 .map_err(|err| eyre::eyre!("{source:?} no pudo ser deserializado. Hay que controlar que tenga los headers correctos. Err: {err}"))?
             }
-            utils::DataSources::Json => {
+            DataSources::Json => {
                 let file = File::open(&source)?;
                 let reader = BufReader::new(file);
 
@@ -390,10 +383,9 @@ fn parse_and_insert(
 }
 
 pub fn update_historial(db: &Connection, query: &str) -> eyre::Result<(), ReportError> {
-    match db.execute(
-        "insert or replace into historial(query) values (?)",
-        [query],
-    ) {
+    match db.execute("insert or replace into historial(query) values (?)", [
+        query,
+    ]) {
         Ok(updated) => {
             tracing::info!("{} registros fueron añadidos al historial!", updated);
         }
@@ -412,7 +404,8 @@ pub fn get_historial(db: &Connection) -> eyre::Result<Vec<Historial>, ReportErro
         Ok(stmt) => stmt,
         Err(err) => {
             tracing::error!("{}", err);
-            return Err(ReportError(err.into()));
+            let report_error = ReportError(err.into());
+            return Err(report_error);
         }
     };
 
@@ -451,4 +444,14 @@ pub fn clean_html(str: String) -> String {
     } else {
         str
     }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // #[test]
+    // fn it_works() {
+    //     let result = add(2, 2);
+    //     assert_eq!(result, 4);
+    // }
 }

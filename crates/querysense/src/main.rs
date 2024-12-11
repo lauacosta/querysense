@@ -1,12 +1,15 @@
 use clap::Parser;
-use querysense::{
-    cli::{Cli, Commands, SyncStrategy},
-    configuration, openai, sqlite, startup,
+use querysense::startup;
+use querysense_cli::{Cli, Commands, Model, SyncStrategy};
+use querysense_configuration::{ApplicationSettings, Template};
+use querysense_openai::embed_single;
+use querysense_sqlite::{
+    init_sqlite, insert_base_data, setup_sqlite, sync_fts_tnea, sync_vec_tnea,
 };
 use rusqlite::Connection;
-use tracing::{level_filters::LevelFilter, Level};
+use tracing::{Level, level_filters::LevelFilter};
 use tracing_error::ErrorLayer;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Registry};
+use tracing_subscriber::{Registry, layer::SubscriberExt, util::SubscriberInitExt};
 use tracing_tree::HierarchicalLayer;
 
 fn main() -> eyre::Result<()> {
@@ -40,7 +43,7 @@ fn main() -> eyre::Result<()> {
         eyre::eyre!("Hubo un error al leer la variable de entorno `TEMPLATE` {err}.")
     })?;
 
-    let template = configuration::Template::try_from(template)
+    let template = Template::try_from(template)
         .map_err(|err| eyre::eyre!("Hubo un error al parsear el template {err}"))?;
 
     match cli.command {
@@ -49,7 +52,7 @@ fn main() -> eyre::Result<()> {
             port,
             cache,
         } => {
-            let configuration = configuration::ApplicationSettings::new(port, interface, cache);
+            let configuration = ApplicationSettings::new(port, interface, cache);
 
             tracing::debug!("{:?}", &configuration);
             let rt = tokio::runtime::Runtime::new()?;
@@ -62,9 +65,10 @@ fn main() -> eyre::Result<()> {
         Commands::Sync {
             sync_strat,
             force: hard,
+            time_backoff,
             model,
         } => {
-            let db = Connection::open(sqlite::init_sqlite()?)?;
+            let db = Connection::open(init_sqlite()?)?;
 
             if hard {
                 let exists: String = match db.query_row(
@@ -77,7 +81,7 @@ fn main() -> eyre::Result<()> {
                         return Err(eyre::eyre!(
                             "Es probable que la base de datos no esté creada. err: {}",
                             err
-                        ))
+                        ));
                     }
                 };
 
@@ -90,19 +94,19 @@ fn main() -> eyre::Result<()> {
 
             let start = std::time::Instant::now();
 
-            sqlite::setup_sqlite(&db, &model)?;
-            sqlite::insert_base_data(&db, &template)?;
+            setup_sqlite(&db, &model)?;
+            insert_base_data(&db, &template)?;
 
             match sync_strat {
-                SyncStrategy::Fts => sqlite::sync_fts_tnea(&db),
+                SyncStrategy::Fts => sync_fts_tnea(&db),
                 SyncStrategy::Vector => {
                     let rt = tokio::runtime::Runtime::new()?;
-                    rt.block_on(sqlite::sync_vec_tnea(&db, model))?;
+                    rt.block_on(sync_vec_tnea(&db, model, time_backoff))?;
                 }
                 SyncStrategy::All => {
-                    sqlite::sync_fts_tnea(&db);
+                    sync_fts_tnea(&db);
                     let rt = tokio::runtime::Runtime::new()?;
-                    rt.block_on(sqlite::sync_vec_tnea(&db, model))?;
+                    rt.block_on(sync_vec_tnea(&db, model, time_backoff))?;
                 }
             }
 
@@ -112,15 +116,13 @@ fn main() -> eyre::Result<()> {
             );
         }
         Commands::Embed { input, model } => match model {
-            querysense::cli::Model::OpenAI => {
+            Model::OpenAI => {
                 let client = reqwest::Client::new();
                 let rt = tokio::runtime::Runtime::new()?;
-                let output = rt.block_on(openai::embed_single(input, &client))?;
+                let output = rt.block_on(embed_single(input, &client))?;
                 println!("{output:?}");
             }
-
-            #[cfg(feature = "local")]
-            querysense::cli::Model::Local => {
+            Model::Local => {
                 todo!()
             }
         },

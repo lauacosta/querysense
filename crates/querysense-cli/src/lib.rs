@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use clap::{command, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum, command};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -34,6 +34,9 @@ pub enum Commands {
         #[arg(value_enum, short = 'S', long, default_value_t = SyncStrategy::Fts)]
         sync_strat: SyncStrategy,
 
+        #[arg(short = 'T', long, default_value_t = 5)]
+        time_backoff: u64,
+
         /// Determina si utilizar un modelo local o remoto (Actualmente solo es "text-embedding-3-small").
         #[arg(value_enum, short = 'M', long, default_value_t = Model::OpenAI)]
         model: Model,
@@ -60,7 +63,6 @@ pub enum SyncStrategy {
 #[derive(Clone, ValueEnum)]
 pub enum Model {
     OpenAI,
-    #[cfg(feature = "local")]
     Local,
 }
 
@@ -68,4 +70,15 @@ pub enum Model {
 pub enum Cache {
     Enabled,
     Disabled,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // #[test]
+    // fn it_works() {
+    //     let result = add(2, 2);
+    //     assert_eq!(result, 4);
+    // }
 }

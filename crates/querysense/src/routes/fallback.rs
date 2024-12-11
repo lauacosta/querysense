@@ -1,4 +1,4 @@
-use crate::templates::Fallback;
+use querysense_ui::Fallback;
 
 #[tracing::instrument(name = "Ha ocurrido un error, mostrando la pantalla auxiliar")]
 pub async fn fallback() -> impl axum::response::IntoResponse {

@@ -1,0 +1,12 @@
+[package]
+name = "querysense-ui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rinja = { version = "0.3.5", features = ["with-axum"] }
+rinja_axum = "0.3.5"
+
+serde.workspace = true
+axum.workspace = true
+rusqlite.workspace = true

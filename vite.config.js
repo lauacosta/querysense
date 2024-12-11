@@ -8,8 +8,8 @@ export default defineConfig({
 		outDir: "dist",
 		rollupOptions: {
 			input: {
-				main: resolve(__dirname, "assets/main.js"),
-				styles: resolve(__dirname, "assets/styles.css"),
+				main: resolve(__dirname, "./assets/main.js"),
+				styles: resolve(__dirname, "./assets/styles.css"),
 			},
 			output: {
 				entryFileNames: "[name].js",

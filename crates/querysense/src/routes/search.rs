@@ -1,10 +1,12 @@
 use axum::{
-    extract::{Query, State},
     Extension,
+    extract::{Query, State},
 };
+use querysense_cli::Cache;
+use querysense_ui::SearchResponse;
 use tracing::instrument;
 
-use crate::{cli::Cache, routes::Params, startup::AppState, templates::SearchResponse};
+use crate::{routes::Params, startup::AppState};
 
 #[axum::debug_handler]
 #[instrument(name = "Realizando la búsqueda", skip(app, client))]

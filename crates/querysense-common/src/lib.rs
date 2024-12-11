@@ -1,3 +1,27 @@
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+
+#[derive(Debug)]
+pub struct ReportError(pub eyre::Report);
+
+impl From<eyre::Report> for ReportError {
+    fn from(err: eyre::Report) -> Self {
+        ReportError(err)
+    }
+}
+
+impl IntoResponse for ReportError {
+    fn into_response(self) -> Response {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Internal server error: {:?}", self.0),
+        )
+            .into_response()
+    }
+}
+
 use std::path::{Path, PathBuf};
 
 use eyre::eyre;
@@ -53,7 +77,7 @@ where
 }
 
 #[derive(Debug, PartialEq)]
-pub(crate) enum DataSources {
+pub enum DataSources {
     Csv,
     Json,
 }
@@ -70,7 +94,7 @@ impl DataSources {
     }
 }
 
-pub(crate) fn parse_sources(path: impl AsRef<Path>) -> eyre::Result<Vec<(PathBuf, DataSources)>> {
+pub fn parse_sources(path: impl AsRef<Path>) -> eyre::Result<Vec<(PathBuf, DataSources)>> {
     let mut datasources = Vec::new();
 
     tracing::info!("Escaneando los archivos disponibles...");
@@ -88,4 +112,15 @@ pub(crate) fn parse_sources(path: impl AsRef<Path>) -> eyre::Result<Vec<(PathBuf
     tracing::info!("Escaneando los archivos disponibles... listo!");
 
     Ok(datasources)
+}
+
+#[cfg(test)]
+mod tests {
+    // use super::*;
+
+    // #[test]
+    // fn it_works() {
+    //     let result = add(2, 2);
+    //     assert_eq!(result, 4);
+    // }
 }
