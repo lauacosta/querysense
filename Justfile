@@ -1,8 +1,13 @@
+_default:
+    just --list
+
 serve:
     cargo run --quiet --release -- serve
 
-all: assets serve
+udeps:
+    cargo udeps --all-targets --backend depinfo
 
+all: assets serve
 
 assets:
     bun vite build
