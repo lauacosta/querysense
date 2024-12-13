@@ -11,7 +11,6 @@ use serde::Deserialize;
 pub enum SearchResponse {
     Common(Table),
     RrfTable(RrfTable),
-    Fallback(Fallback),
 }
 
 impl IntoResponse for SearchResponse {
@@ -19,7 +18,6 @@ impl IntoResponse for SearchResponse {
         match self {
             SearchResponse::Common(table) => table.into_response(),
             SearchResponse::RrfTable(rrf_table) => rrf_table.into_response(),
-            SearchResponse::Fallback(fallback) => fallback.into_response(),
         }
     }
 }
@@ -36,21 +34,11 @@ impl From<RrfTable> for SearchResponse {
     }
 }
 
-impl From<Fallback> for SearchResponse {
-    fn from(value: Fallback) -> Self {
-        SearchResponse::Fallback(value)
-    }
-}
-
 #[derive(Template)]
 #[template(path = "index.html")]
 pub struct Index {
     pub historial: Vec<Historial>,
 }
-
-#[derive(Template)]
-#[template(path = "fallback.html")]
-pub struct Fallback;
 
 #[derive(Template)]
 #[template(path = "table.html")]

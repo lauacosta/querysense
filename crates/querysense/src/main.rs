@@ -65,8 +65,7 @@ fn main() -> eyre::Result<()> {
         Commands::Sync {
             sync_strat,
             force: hard,
-            time_backoff,
-            model,
+            base_delay, // model,
         } => {
             let db = Connection::open(init_sqlite()?)?;
 
@@ -94,19 +93,19 @@ fn main() -> eyre::Result<()> {
 
             let start = std::time::Instant::now();
 
-            setup_sqlite(&db, &model)?;
+            setup_sqlite(&db)?;
             insert_base_data(&db, &template)?;
 
             match sync_strat {
                 SyncStrategy::Fts => sync_fts_tnea(&db),
                 SyncStrategy::Vector => {
                     let rt = tokio::runtime::Runtime::new()?;
-                    rt.block_on(sync_vec_tnea(&db, model, time_backoff))?;
+                    rt.block_on(sync_vec_tnea(&db, base_delay))?;
                 }
                 SyncStrategy::All => {
                     sync_fts_tnea(&db);
                     let rt = tokio::runtime::Runtime::new()?;
-                    rt.block_on(sync_vec_tnea(&db, model, time_backoff))?;
+                    rt.block_on(sync_vec_tnea(&db, base_delay))?;
                 }
             }
 

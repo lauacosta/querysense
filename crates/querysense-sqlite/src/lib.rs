@@ -9,8 +9,7 @@ use std::{
 };
 
 use futures::StreamExt;
-use querysense_cli::Model;
-use querysense_common::{DataSources, ReportError, TneaData, parse_sources};
+use querysense_common::{parse_sources, DataSources, HttpError, TneaData};
 use querysense_configuration::Template;
 use querysense_openai::embed_vec;
 use querysense_ui::Historial;
@@ -18,7 +17,11 @@ use rusqlite::{Connection, ffi::sqlite3_auto_extension};
 use sqlite_vec::sqlite3_vec_init;
 use zerocopy::IntoBytes;
 
-pub async fn sync_vec_tnea(db: &Connection, model: Model, time_backoff: u64) -> eyre::Result<()> {
+pub async fn sync_vec_tnea(
+    db: &Connection,
+    // model: Model,
+    base_delay: u64,
+) -> eyre::Result<()> {
     let mut statement = db.prepare("select id, template from tnea")?;
 
     let templates: Vec<(u64, String)> = match statement.query_map([], |row| {
@@ -44,14 +47,16 @@ pub async fn sync_vec_tnea(db: &Connection, model: Model, time_backoff: u64) -> 
     let jh = templates
         .chunks(chunk_size)
         .enumerate()
-        .map(|(proc_id, chunk)| match model {
-            Model::OpenAI => {
+        .map(|(proc_id, chunk)| 
+        //     match model {
+            // Model::OpenAI =>
+            {
                 let indices: Vec<u64> = chunk.iter().map(|(id, _)| *id).collect();
                 let templates: Vec<String> =
                     chunk.iter().map(|(_, template)| template.clone()).collect();
-                embed_vec(indices, templates, &client, proc_id, time_backoff)
-            }
-            Model::Local => todo!(),
+                embed_vec(indices, templates, &client, proc_id, base_delay)
+            // }
+            // Model::Local => todo!(),
         });
 
     let stream = futures::stream::iter(jh);
@@ -136,7 +141,10 @@ pub fn init_sqlite() -> eyre::Result<String> {
     Ok(path)
 }
 
-pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()> {
+pub fn setup_sqlite(
+    db: &rusqlite::Connection,
+    // model: &Model
+) -> eyre::Result<()> {
     let (sqlite_version, vec_version): (String, String) =
         db.query_row("select sqlite_version(), vec_version()", [], |row| {
             Ok((row.get(0)?, row.get(1)?))
@@ -207,22 +215,21 @@ pub fn setup_sqlite(db: &rusqlite::Connection, model: &Model) -> eyre::Result<()
 
         {}
         ",
-        match model {
-            Model::OpenAI => {
-                "create virtual table if not exists vec_tnea using vec0(
+        // match model {
+        //     Model::OpenAI => {
+        "create virtual table if not exists vec_tnea using vec0(
                     row_id integer primary key,
                     template_embedding float[1536]
-                );"
-            }
+                );" // }
 
-            Model::Local => {
-                todo!()
-                // "create virtual table if not exists vec_tnea using vec0(
-                //     row_id integer primary key,
-                //     template_embedding float[512]
-                // );"
-            }
-        }
+                    // Model::Local => {
+                    //     // todo!()
+                    //     // "create virtual table if not exists vec_tnea using vec0(
+                    //     //     row_id integer primary key,
+                    //     //     template_embedding float[512]
+                    //     // );"
+                    // }
+                    // }
     );
 
     db.execute_batch(&statement)
@@ -382,49 +389,26 @@ fn parse_and_insert(
     Ok(inserted)
 }
 
-pub fn update_historial(db: &Connection, query: &str) -> eyre::Result<(), ReportError> {
-    match db.execute("insert or replace into historial(query) values (?)", [
+pub fn update_historial(db: &Connection, query: &str) -> eyre::Result<(), HttpError> {
+    let updated = db.execute("insert or replace into historial(query) values (?)", [
         query,
-    ]) {
-        Ok(updated) => {
-            tracing::info!("{} registros fueron añadidos al historial!", updated);
-        }
-        Err(err) => {
-            tracing::error!("{}", err);
-            return Err(ReportError(err.into()));
-        }
-    }
+    ])?;
+    tracing::info!("{} registros fueron añadidos al historial!", updated);
 
     Ok(())
 }
 
-pub fn get_historial(db: &Connection) -> eyre::Result<Vec<Historial>, ReportError> {
-    let mut statement = match db.prepare("select id, query from historial order by timestamp desc")
-    {
-        Ok(stmt) => stmt,
-        Err(err) => {
-            tracing::error!("{}", err);
-            let report_error = ReportError(err.into());
-            return Err(report_error);
-        }
-    };
+pub fn get_historial(db: &Connection) -> eyre::Result<Vec<Historial>, HttpError> {
+    let mut statement = db.prepare("select id, query from historial order by timestamp desc")?;
 
-    let rows = match statement.query_map([], |row| {
+    let rows = statement.query_map([], |row| {
         let id: u64 = row.get(0).unwrap_or_default();
         let query: String = row.get(1).unwrap_or_default();
 
         let data = Historial::new(id, query);
 
         Ok(data)
-    }) {
-        Ok(rows) => rows
-            .collect::<Result<Vec<Historial>, _>>()
-            .unwrap_or_default(),
-        Err(err) => {
-            tracing::error!("{}", err);
-            return Err(ReportError(err.into()));
-        }
-    };
+    })?.collect::<Result<Vec<Historial>, _>>()?;
 
     Ok(rows)
 }

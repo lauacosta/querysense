@@ -60,10 +60,11 @@ async fn request_embeddings(
     attempt: u32,
     max_retries: u32,
     time_backoff: u64,
+    proc_id: usize,
 ) -> Result<reqwest::Response, EmbeddingError> {
     if attempt > 0 {
-        tracing::warn!("Intento {} of {}", attempt, max_retries);
-        let delay = Duration::from_millis(1000 * time_backoff.pow(attempt - 1));
+        tracing::warn!("Intento {attempt}/{max_retries} [{proc_id}]");
+        let delay = Duration::from_millis(1000 * time_backoff.pow(attempt));
         tokio::time::sleep(delay).await;
     }
 
@@ -78,15 +79,17 @@ async fn request_embeddings(
         status if status.is_success() => Ok(response),
         status if status.as_u16() == 429 => {
             if attempt >= max_retries {
-                tracing::error!("El maximo numero de intentos fue excedido bajo rate limit");
+                tracing::error!(
+                    "El maximo numero de intentos fue excedido bajo rate limit [{proc_id}]"
+                );
                 Err(EmbeddingError::MaxRetriesExceeded)
             } else {
-                tracing::error!("Rate limit excedido, volviendo a intentar...");
+                tracing::error!("Rate limit excedido, volviendo a intentar... [{proc_id}]");
                 Err(EmbeddingError::RateLimit)
             }
         }
         status => {
-            tracing::error!("El request ha fallado con status: {status}");
+            tracing::error!("El request ha fallado con status: {status} [{proc_id}]");
             Err(EmbeddingError::RequestError(
                 response.error_for_status().unwrap_err(),
             ))
@@ -120,7 +123,7 @@ pub async fn embed_vec(
 
     while intento <= MAX_INTENTOS {
         let req_start = Instant::now();
-        tracing::info!("Enviando request a Open AI...");
+        tracing::info!("Enviando request a Open AI... [{proc_id}]");
         match request_embeddings(
             client,
             &token,
@@ -128,11 +131,15 @@ pub async fn embed_vec(
             intento,
             MAX_INTENTOS,
             time_backoff,
+            proc_id,
         )
         .await
         {
             Ok(resp) => {
-                tracing::info!("El request tomó {} ms", req_start.elapsed().as_millis());
+                tracing::info!(
+                    "El request tomó {} ms [{proc_id}]",
+                    req_start.elapsed().as_millis()
+                );
                 response = Some(resp);
                 break;
             }
@@ -150,23 +157,18 @@ pub async fn embed_vec(
     let response: ResponseBody = response.json().await?;
 
     tracing::info!(
-        "Deserializar la response a ResponseBody tomó {} ms",
+        "Deserializar la response a ResponseBody tomó {} ms [{proc_id}]",
         start.elapsed().as_millis()
     );
 
-    let start = Instant::now();
     let embedding = std::iter::zip(
         indices,
         EmbeddingObject::embeddings_iter(response.embeddings),
     )
     .collect();
-    tracing::info!(
-        "La conversión de Vec<EmbeddingObject> a Vec<Vec<f32>> tomó {} ms",
-        start.elapsed().as_millis()
-    );
 
     tracing::info!(
-        "Embedding generado correctamente! en total tomó {} ms",
+        "Embedding generado correctamente! en total tomó {} ms [{proc_id}]",
         global_start.elapsed().as_millis()
     );
     Ok(embedding)

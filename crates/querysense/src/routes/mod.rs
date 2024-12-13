@@ -1,28 +1,27 @@
 mod assets;
-mod fallback;
 mod health_check;
 mod historial;
 mod index;
 mod search;
 
 pub use assets::*;
-pub use fallback::*;
+use axum::{async_trait, extract::FromRequestParts, response::IntoResponse};
+use color_eyre::Report;
 pub use health_check::*;
 pub use historial::*;
+use http::{Uri, request::Parts};
 pub use index::*;
 
-use querysense_common::ReportError;
+use querysense_common::{HttpError, SearchResult};
 use querysense_openai::embed_single;
 use querysense_sqlite::{get_historial, normalize};
-use querysense_ui::{
-    Fallback, Historial, ReRankDisplay, ResponseMarker, RrfTable, SearchResponse, Sexo, Table,
-    TneaDisplay,
-};
+use querysense_ui::{Historial, ReRankDisplay, ResponseMarker, RrfTable, Sexo, Table, TneaDisplay};
 use reqwest::Client;
 use rusqlite::{Connection, ToSql};
 pub use search::*;
 
-use serde::Deserialize;
+use serde::{Deserialize, de::DeserializeOwned};
+use thiserror::Error;
 use tracing::instrument;
 use zerocopy::IntoBytes;
 
@@ -87,7 +86,7 @@ pub enum SearchStrategy {
 }
 
 impl SearchStrategy {
-    pub async fn search(self, db_path: &str, client: &Client, params: Params) -> SearchResponse {
+    pub async fn search(self, db_path: &str, client: &Client, params: Params) -> SearchResult {
         let db = Connection::open(db_path)
             .expect("Deberia ser un path valido a una base de datos sqlite.");
         let search = SearchString::parse(&params.search_str);
@@ -101,7 +100,7 @@ impl SearchStrategy {
                 let mut search_query = SearchQuery::new(
                     &db,
                     "select
-                    rank as score, 
+                    rank as score,
                     email, 
                     provincia,
                     ciudad,
@@ -131,7 +130,7 @@ impl SearchStrategy {
 
                 search_query.push_str(" order by rank");
 
-                let table = match search_query.execute(|row| {
+                let table = search_query.execute(|row| {
                     let score = row.get::<_, f32>(0).unwrap_or_default() * -1.;
                     let email: String = row.get(1).unwrap_or_default();
                     let provincia: String = row.get(2).unwrap_or_default();
@@ -143,10 +142,7 @@ impl SearchStrategy {
                     let data =
                         TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
                     Ok(data)
-                }) {
-                    Ok(rows) => rows,
-                    Err(response) => return response,
-                };
+                })?;
 
                 tracing::info!(
                     "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
@@ -156,17 +152,14 @@ impl SearchStrategy {
                     table.last().map_or_else(Default::default, |d| d.score),
                 );
 
-                let historial = match update_historial(&db, &params.search_str) {
-                    Ok(historial) => historial,
-                    Err(response) => return response,
-                };
+                let historial = update_historial(&db, &params.search_str)?;
 
-                Table {
+                Ok(Table {
                     msg: format!("Hay un total de {} resultados.", table.len()),
                     table,
                     historial,
                 }
-                .into()
+                .into_response())
             }
             SearchStrategy::Semantic => {
                 let query_emb = embed_single(query.to_string(), client)
@@ -211,7 +204,7 @@ impl SearchStrategy {
                     Sexo::U => (),
                 };
 
-                let table = match search_query.execute(|row| {
+                let table = search_query.execute(|row| {
                     let score = row.get::<_, f32>(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
                     let provincia: String = row.get(2).unwrap_or_default();
@@ -224,10 +217,7 @@ impl SearchStrategy {
                         TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
 
                     Ok(data)
-                }) {
-                    Ok(rows) => rows,
-                    Err(response) => return response,
-                };
+                })?;
 
                 tracing::info!(
                     "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
@@ -237,17 +227,14 @@ impl SearchStrategy {
                     table.last().map_or_else(Default::default, |d| d.score),
                 );
 
-                let historial = match update_historial(&db, &params.search_str) {
-                    Ok(historial) => historial,
-                    Err(response) => return response,
-                };
+                let historial = update_historial(&db, &params.search_str)?;
 
-                Table {
+                Ok(Table {
                     msg: format!("Hay un total de {} resultados.", table.len()),
                     table,
                     historial,
                 }
-                .into()
+                .into_response())
             }
             SearchStrategy::ReciprocalRankFusion => {
                 let query_emb = embed_single(query.to_string(), client)
@@ -339,7 +326,7 @@ impl SearchStrategy {
                 ",
                 );
 
-                let table = match search_query.execute(|row| {
+                let table = search_query.execute(|row| {
                     let template: String = row.get(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
                     let provincia: String = row.get(2).unwrap_or_default();
@@ -366,10 +353,7 @@ impl SearchStrategy {
                         fts_score,
                     );
                     Ok(data)
-                }) {
-                    Ok(rows) => rows,
-                    Err(response) => return response,
-                };
+                })?;
 
                 tracing::info!(
                     "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
@@ -383,18 +367,16 @@ impl SearchStrategy {
                         .map_or_else(Default::default, |d| d.combined_rank),
                 );
 
-                let historial = match update_historial(&db, &params.search_str) {
-                    Ok(historial) => historial,
-                    Err(response) => return response,
-                };
+                let historial = update_historial(&db, &params.search_str)?;
 
-                RrfTable {
+                Ok(RrfTable {
                     msg: format!("Hay un total de {} resultados.", table.len()),
                     table,
                     historial,
                 }
-                .into()
+                .into_response())
             }
+
             SearchStrategy::KeywordFirst => {
                 let query_emb = embed_single(query.to_string(), client)
                     .await
@@ -471,7 +453,7 @@ impl SearchStrategy {
 
                 search_query.push_str(" ) select * from final;");
 
-                let rows = match search_query.execute(|row| {
+                let rows = search_query.execute(|row| {
                     let template: String = row.get(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
                     let provincia: String = row.get(2).unwrap_or_default();
@@ -483,10 +465,7 @@ impl SearchStrategy {
                     let data =
                         TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
                     Ok(data)
-                }) {
-                    Ok(rows) => rows,
-                    Err(response) => return response,
-                };
+                })?;
 
                 tracing::info!(
                     "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
@@ -496,17 +475,14 @@ impl SearchStrategy {
                     rows.last().map_or_else(Default::default, |d| d.score),
                 );
 
-                let historial = match update_historial(&db, &params.search_str) {
-                    Ok(historial) => historial,
-                    Err(response) => return response,
-                };
+                let historial = update_historial(&db, &params.search_str)?;
 
-                Table {
+                Ok(Table {
                     msg: format!("Hay un total de {} resultados.", rows.len()),
                     table: rows,
                     historial,
                 }
-                .into()
+                .into_response())
             }
             SearchStrategy::ReRankBySemantics => {
                 let query_emb = embed_single(query.to_string(), client)
@@ -574,7 +550,7 @@ impl SearchStrategy {
                     &[&embedding],
                 );
 
-                let rows = match search_query.execute(|row| {
+                let rows = search_query.execute(|row| {
                     let template: String = row.get(0).unwrap_or_default();
                     let email: String = row.get(1).unwrap_or_default();
                     let provincia: String = row.get(2).unwrap_or_default();
@@ -586,10 +562,7 @@ impl SearchStrategy {
                     let data =
                         TneaDisplay::new(email, provincia, ciudad, edad, sexo, template, score);
                     Ok(data)
-                }) {
-                    Ok(rows) => rows,
-                    Err(response) => return response,
-                };
+                })?;
 
                 tracing::info!(
                     "Busqueda para el query: `{}`, exitosa! de {} registros, el mejor puntaje fue: `{}` y el peor fue: `{}`",
@@ -599,24 +572,21 @@ impl SearchStrategy {
                     rows.last().map_or_else(Default::default, |d| d.score),
                 );
 
-                let historial = match update_historial(&db, &params.search_str) {
-                    Ok(historial) => historial,
-                    Err(response) => return response,
-                };
+                let historial = update_historial(&db, &params.search_str)?;
 
-                Table {
+                Ok(Table {
                     msg: format!("Hay un total de {} resultados.", rows.len()),
                     table: rows,
                     historial,
                 }
-                .into()
+                .into_response())
             }
         }
     }
 }
 
 impl TryFrom<String> for SearchStrategy {
-    type Error = String;
+    type Error = Report;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         match value.to_lowercase().as_str() {
@@ -625,11 +595,17 @@ impl TryFrom<String> for SearchStrategy {
             "rrf" => Ok(Self::ReciprocalRankFusion),
             "hkf" => Ok(Self::KeywordFirst),
             "rrs" => Ok(Self::ReRankBySemantics),
-            other => Err(format!(
-                "{other} No es una estrategia de búsqueda soportada, usa 'fts', 'semantic_search', 'HKF' o 'rrf'",
-            )),
+            other => Err(SearchStrategyError::UnsupportedSearchStrategy(other.to_string()).into()),
         }
     }
+}
+
+#[derive(Debug, Error)]
+enum SearchStrategyError {
+    #[error(
+        "'{0}' No es una estrategia de búsqueda soportada, usa 'fts', 'semantic_search', 'HKF' o 'rrf'"
+    )]
+    UnsupportedSearchStrategy(String),
 }
 
 struct SearchQuery<'a> {
@@ -660,31 +636,19 @@ impl<'a> SearchQuery<'a> {
         self.stmt_str.push_str(stmt);
     }
 
-    fn execute<F, T>(&self, map_fn: F) -> Result<Vec<T>, SearchResponse>
+    fn execute<F, T>(&self, map_fn: F) -> Result<Vec<T>, HttpError>
     where
         T: ResponseMarker,
         F: Fn(&rusqlite::Row) -> rusqlite::Result<T>,
     {
         tracing::debug!("{:?}", self.stmt_str);
-        let mut statement = match self.db.prepare(&self.stmt_str) {
-            Ok(stmt) => stmt,
-            Err(err) => {
-                let err = ReportError(err.into());
-                tracing::error!("{:?}", err);
-                return Err(Fallback.into());
-            }
-        };
+        let mut statement = self.db.prepare(&self.stmt_str)?;
 
-        let table = match statement.query_map(&*self.bindings, map_fn) {
-            Ok(rows) => Ok(rows.collect::<Result<Vec<T>, _>>().unwrap_or_default()),
-            Err(err) => {
-                let err = ReportError(err.into());
-                tracing::error!("{:?}", err);
-                return Err(Fallback.into());
-            }
-        };
+        let table = statement
+            .query_map(&*self.bindings, map_fn)?
+            .collect::<Result<Vec<T>, _>>()?;
 
-        table
+        Ok(table)
     }
 }
 
@@ -692,18 +656,34 @@ impl<'a> SearchQuery<'a> {
 fn update_historial(
     db: &rusqlite::Connection,
     query: &str,
-) -> eyre::Result<Vec<Historial>, SearchResponse> {
-    if let Err(err) = querysense_sqlite::update_historial(db, query) {
-        tracing::error!("{:?}", err);
-        return Err(Fallback.into());
-    }
+) -> eyre::Result<Vec<Historial>, HttpError> {
+    querysense_sqlite::update_historial(db, query)?;
 
-    let historial = match get_historial(db) {
-        Ok(historial) => historial,
-        Err(err) => {
-            tracing::error!("{:?}", err);
-            return Err(Fallback.into());
-        }
-    };
-    Ok(historial)
+    Ok(get_historial(db)?)
+}
+
+pub struct SearchExtractor<T>(pub T);
+
+impl<T> SearchExtractor<T>
+where
+    T: DeserializeOwned,
+{
+    pub fn try_from_uri(value: &Uri) -> Result<Self, HttpError> {
+        let query = value.query().unwrap_or_default();
+        let params = serde_urlencoded::from_str(query)?;
+        Ok(SearchExtractor(params))
+    }
+}
+
+#[async_trait]
+impl<T, S> FromRequestParts<S> for SearchExtractor<T>
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        Self::try_from_uri(&parts.uri)
+    }
 }

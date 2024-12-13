@@ -1,5 +1,4 @@
 use axum::Extension;
-use axum::handler::HandlerWithoutStateExt;
 use querysense_cli::Cache;
 use querysense_configuration::ApplicationSettings;
 use querysense_sqlite::init_sqlite;
@@ -127,7 +126,6 @@ pub fn build_server(
         .route("/search", get(routes::search))
         .route("/historial", get(routes::get_from_db))
         .route("/_assets/*path", get(routes::handle_assets))
-        .fallback_service(routes::fallback.into_service())
         .with_state(state)
         .layer(Extension(
             reqwest::ClientBuilder::new()

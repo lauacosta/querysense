@@ -17,6 +17,7 @@ lto = "thin"
 # local = ["dep:candle-nn", "dep:candle-core",  "dep:hf-hub" ,"dep:tokenizers", "dep:candle-transformers"]
 
 [workspace.dependencies]
+thiserror = "2.0.3"
 axum = { version = "0.7.5", features = ["macros"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -29,6 +30,9 @@ clap = { version = "4.5.20", features = ["derive"] }
 reqwest = { version = "0.12.8", default-features = false, features = ["json", "stream", "rustls-tls", "gzip", "deflate"] }
 color-eyre = "0.6.3"
 eyre = "0.6.12"
+rinja = { version = "0.3.5", features = ["with-axum"] }
+rinja_axum = "0.3.5"
+serde_urlencoded = "0.7.1"
 
 [profile.profiling]
 inherits = "release"

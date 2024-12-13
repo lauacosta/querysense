@@ -14,11 +14,13 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Inicia el cliente web para realizar búsquedas
+    /// Inicia el cliente web.
     Serve {
+        /// Establece la dirección IP.
         #[clap(short = 'I', long, default_value = "127.0.0.1")]
         interface: IpAddr,
 
+        /// Establece el puerto en el cual escuchar.
         #[clap(short = 'P', long, default_value_t = 3000)]
         port: u16,
 
@@ -30,16 +32,17 @@ pub enum Commands {
         /// Fuerza la actualización incluso cuando la base de datos no está vacía.
         #[arg(long, default_value = "false")]
         force: bool,
+
         /// Determina la estrategia para actualizar la base de datos.
         #[arg(value_enum, short = 'S', long, default_value_t = SyncStrategy::Fts)]
         sync_strat: SyncStrategy,
 
+        /// Determina la cantidad de tiempo base al hacer backoff en los requests.
         #[arg(short = 'T', long, default_value_t = 5)]
-        time_backoff: u64,
-
-        /// Determina si utilizar un modelo local o remoto (Actualmente solo es "text-embedding-3-small").
-        #[arg(value_enum, short = 'M', long, default_value_t = Model::OpenAI)]
-        model: Model,
+        base_delay: u64,
+        // /// Determina si utilizar un modelo local o remoto (Actualmente solo es "text-embedding-3-small").
+        // #[arg(value_enum, short = 'M', long, default_value_t = Model::OpenAI)]
+        // model: Model,
     },
 
     /// Genera un embedding en base a una input
