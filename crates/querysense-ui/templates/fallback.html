@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error Encontrado</title>
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .error-container {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 2rem;
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+        }
+        .error-icon {
+            background-color: #fee2e2;
+            color: #dc2626;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0 auto 1rem;
+            font-size: 24px;
+        }
+        h1 {
+            color: #111827;
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            color: #6b7280;
+            font-size: 0.875rem;
+            margin-bottom: 1.5rem;
+        }
+        .button {
+            display: inline-block;
+            width: 100%;
+            padding: 0.5rem;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            text-align: center;
+            text-decoration: none;
+            cursor: pointer;
+            transition: background-color 0.2s, color 0.2s;
+            margin-bottom: 0.5rem;
+        }
+        .button-primary {
+            background-color: #2563eb;
+            color: white;
+        }
+        .button-primary:hover, .button-primary:focus {
+            background-color: #1d4ed8;
+        }
+        .button-secondary {
+            background-color: white;
+            color: #111827;
+            border: 1px solid #d1d5db;
+        }
+        .button-secondary:hover, .button-secondary:focus {
+            background-color: #f3f4f6;
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">!</div>
+        <h1>Error Encontrado</h1>
+        <p>Lo sentimos, ha ocurrido un error. Por favor, intente nuevamente o busque ayuda.</p>
+        <a href="" class="button button-primary" role="button">Intentar Nuevamente</a>
+        <a href="/" class="button button-secondary" role="button">Volver al Inicio</a>
+    </div>
+</body>
+</html>

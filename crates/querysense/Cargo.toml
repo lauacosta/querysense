@@ -1,0 +1,37 @@
+[package]
+name = "querysense"
+version = "0.1.0"
+edition = "2024"
+authors = ["Lautaro <acostaquintanalautaro@gmail.com>"]
+
+[dependencies]
+dotenvy = "0.15.7"
+tower = "0.5.0"
+tower-http = { version = "0.5.2", features = ["compression-gzip", "cors", "fs", "trace"] }
+tower-request-id = "0.3.0"
+tracing-tree = "0.4.0"
+tracing-error = "0.2.0"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+
+eyre.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+color-eyre.workspace = true
+clap.workspace = true
+axum.workspace = true
+tokio.workspace = true
+rusqlite.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+http.workspace = true
+zerocopy.workspace = true
+serde_urlencoded.workspace = true
+
+querysense-sqlite = { path = "../querysense-sqlite/"}
+querysense-common = { path = "../querysense-common/"}
+querysense-openai = { path = "../querysense-openai/"}
+querysense-ui = { path = "../querysense-ui/"}
+querysense-cli = { path = "../querysense-cli/"}
+querysense-configuration = { path = "../querysense-configuration/"}
+axum-extra = { version = "0.9.6", features = ["typed-header"] }

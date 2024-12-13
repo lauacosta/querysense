@@ -1,0 +1,21 @@
+[package]
+name = "querysense-sqlite"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ammonia = "4.0.0"
+sqlite-vec = "0.1.3"
+futures = "0.3.31"
+csv = "1.3.0"
+zerocopy.workspace = true
+eyre.workspace = true
+rusqlite.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+querysense-openai = { path = "../querysense-openai/" }
+querysense-ui = { path = "../querysense-ui/" }
+querysense-cli = { path = "../querysense-cli/" }
+querysense-configuration = { path = "../querysense-configuration/" }
+querysense-common = { path = "../querysense-common/" }
